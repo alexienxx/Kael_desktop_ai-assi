@@ -250,13 +250,6 @@ export function SettingsPanel({
               <Label className="text-sm font-medium">Connection Status</Label>
               <div className="p-4 rounded-lg glass-panel border border-border/50">
                 <div className="flex items-center gap-2 mb-2">
-<<<<<<< HEAD
-                  <div className="h-2 w-2 rounded-full bg-muted-foreground" />
-                  <span className="text-sm font-medium">Ready for Integration</span>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Backend connection features will be available when integrated with an API service.
-=======
                   <div className={`h-2 w-2 rounded-full ${getStatusColor(connectionStatus)}`} />
                   <span className="text-sm font-medium">{getStatusText(connectionStatus)}</span>
                 </div>
@@ -269,7 +262,6 @@ export function SettingsPanel({
                     ? 'Failed to connect. Check your configuration.'
                     : 'Configure backend to connect'
                   }
->>>>>>> pr10
                 </p>
               </div>
             </div>
@@ -277,14 +269,6 @@ export function SettingsPanel({
             <div className="space-y-3">
               <Label className="text-sm font-medium">Backend Configuration</Label>
               <div className="p-4 rounded-lg glass-panel border border-border/50 space-y-3">
-<<<<<<< HEAD
-                <div className="text-xs text-muted-foreground">
-                  Configure your backend API endpoint, authentication, and connection settings here when ready.
-                </div>
-                <Button variant="secondary" size="sm" className="w-full" disabled>
-                  <Plugs className="h-4 w-4 mr-2" />
-                  Configure Backend
-=======
                 <div className="space-y-2">
                   <Label htmlFor="baseUrl" className="text-xs">Base URL</Label>
                   <Input
@@ -331,7 +315,6 @@ export function SettingsPanel({
                 >
                   <Plugs className="h-4 w-4 mr-2" />
                   Save Configuration
->>>>>>> pr10
                 </Button>
               </div>
             </div>
@@ -339,13 +322,6 @@ export function SettingsPanel({
             <div className="space-y-3">
               <Label className="text-sm font-medium">Developer Options</Label>
               <div className="p-4 rounded-lg glass-panel border border-border/50 space-y-2">
-<<<<<<< HEAD
-                <Button variant="outline" size="sm" className="w-full" disabled>
-                  Test Connection
-                </Button>
-                <Button variant="outline" size="sm" className="w-full" disabled>
-                  View Debug Logs
-=======
                 <Button
                   variant="outline"
                   size="sm"
@@ -354,7 +330,6 @@ export function SettingsPanel({
                   disabled={!backendConfig || testing}
                 >
                   {testing ? 'Testing...' : 'Test Connection'}
->>>>>>> pr10
                 </Button>
               </div>
             </div>
