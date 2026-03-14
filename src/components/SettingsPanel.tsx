@@ -1,10 +1,12 @@
+import { useState } from 'react'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Label } from '@/components/ui/label'
 import { Slider } from '@/components/ui/slider'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Button } from '@/components/ui/button'
-import { ThemeSettings, ThemePreset, BubbleStyle, SpacingMode } from '@/lib/types'
+import { Input } from '@/components/ui/input'
+import { ThemeSettings, ThemePreset, BubbleStyle, SpacingMode, BackendConfig, ConnectionStatus } from '@/lib/types'
 import { themePresets, accentGradients } from '@/lib/theme-config'
 import { Palette, ChatCircle, FolderOpen, Plugs } from '@phosphor-icons/react'
 
@@ -13,9 +15,27 @@ interface SettingsPanelProps {
   onOpenChange: (open: boolean) => void
   themeSettings: ThemeSettings
   onThemeSettingsChange: (settings: ThemeSettings) => void
+  backendConfig: BackendConfig | null
+  onBackendConfigChange: (config: BackendConfig) => void
+  connectionStatus: ConnectionStatus
+  onTestConnection: () => Promise<void>
 }
 
-export function SettingsPanel({ open, onOpenChange, themeSettings, onThemeSettingsChange }: SettingsPanelProps) {
+export function SettingsPanel({
+  open,
+  onOpenChange,
+  themeSettings,
+  onThemeSettingsChange,
+  backendConfig,
+  onBackendConfigChange,
+  connectionStatus,
+  onTestConnection
+}: SettingsPanelProps) {
+  const [localConfig, setLocalConfig] = useState<BackendConfig>(
+    backendConfig || { baseUrl: '', timeout: 30000 }
+  )
+  const [testing, setTesting] = useState(false)
+
   const updateSetting = <K extends keyof ThemeSettings>(key: K, value: ThemeSettings[K]) => {
     onThemeSettingsChange({ ...themeSettings, [key]: value })
   }
@@ -25,6 +45,48 @@ export function SettingsPanel({ open, onOpenChange, themeSettings, onThemeSettin
       preset,
       ...themePresets[preset]
     })
+  }
+
+  const handleSaveConfig = () => {
+    if (!localConfig.baseUrl) {
+      return
+    }
+    onBackendConfigChange(localConfig)
+  }
+
+  const handleTestConnection = async () => {
+    setTesting(true)
+    try {
+      await onTestConnection()
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  const getStatusColor = (status: ConnectionStatus) => {
+    switch (status) {
+      case 'connected':
+        return 'bg-green-500'
+      case 'connecting':
+        return 'bg-yellow-500 animate-pulse'
+      case 'error':
+        return 'bg-red-500'
+      case 'disconnected':
+        return 'bg-muted-foreground'
+    }
+  }
+
+  const getStatusText = (status: ConnectionStatus) => {
+    switch (status) {
+      case 'connected':
+        return 'Connected'
+      case 'connecting':
+        return 'Connecting...'
+      case 'error':
+        return 'Connection Error'
+      case 'disconnected':
+        return 'Disconnected'
+    }
   }
 
   return (
@@ -190,11 +252,18 @@ export function SettingsPanel({ open, onOpenChange, themeSettings, onThemeSettin
               <Label className="text-sm font-medium">Connection Status</Label>
               <div className="p-4 rounded-lg glass-panel border border-border/50">
                 <div className="flex items-center gap-2 mb-2">
-                  <div className="h-2 w-2 rounded-full bg-muted-foreground" />
-                  <span className="text-sm font-medium">Ready for Integration</span>
+                  <div className={`h-2 w-2 rounded-full ${getStatusColor(connectionStatus)}`} />
+                  <span className="text-sm font-medium">{getStatusText(connectionStatus)}</span>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Backend connection features will be available when integrated with an API service.
+                  {connectionStatus === 'connected'
+                    ? 'Backend is connected and ready'
+                    : connectionStatus === 'connecting'
+                    ? 'Establishing connection to backend...'
+                    : connectionStatus === 'error'
+                    ? 'Failed to connect. Check your configuration.'
+                    : 'Configure backend to connect'
+                  }
                 </p>
               </div>
             </div>
@@ -202,12 +271,52 @@ export function SettingsPanel({ open, onOpenChange, themeSettings, onThemeSettin
             <div className="space-y-3">
               <Label className="text-sm font-medium">Backend Configuration</Label>
               <div className="p-4 rounded-lg glass-panel border border-border/50 space-y-3">
-                <div className="text-xs text-muted-foreground">
-                  Configure your backend API endpoint, authentication, and connection settings here when ready.
+                <div className="space-y-2">
+                  <Label htmlFor="baseUrl" className="text-xs">Base URL</Label>
+                  <Input
+                    id="baseUrl"
+                    type="url"
+                    placeholder="https://api.example.com"
+                    value={localConfig.baseUrl}
+                    onChange={(e) => setLocalConfig({ ...localConfig, baseUrl: e.target.value })}
+                    className="text-sm"
+                  />
                 </div>
-                <Button variant="secondary" size="sm" className="w-full" disabled>
+
+                <div className="space-y-2">
+                  <Label htmlFor="apiKey" className="text-xs">API Key (Optional)</Label>
+                  <Input
+                    id="apiKey"
+                    type="password"
+                    placeholder="Enter API key"
+                    value={localConfig.apiKey || ''}
+                    onChange={(e) => setLocalConfig({ ...localConfig, apiKey: e.target.value })}
+                    className="text-sm"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="timeout" className="text-xs">Timeout (seconds)</Label>
+                  <Input
+                    id="timeout"
+                    type="number"
+                    min="5"
+                    max="120"
+                    value={localConfig.timeout / 1000}
+                    onChange={(e) => setLocalConfig({ ...localConfig, timeout: parseInt(e.target.value) * 1000 })}
+                    className="text-sm"
+                  />
+                </div>
+
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="w-full"
+                  onClick={handleSaveConfig}
+                  disabled={!localConfig.baseUrl}
+                >
                   <Plugs className="h-4 w-4 mr-2" />
-                  Configure Backend
+                  Save Configuration
                 </Button>
               </div>
             </div>
@@ -215,11 +324,14 @@ export function SettingsPanel({ open, onOpenChange, themeSettings, onThemeSettin
             <div className="space-y-3">
               <Label className="text-sm font-medium">Developer Options</Label>
               <div className="p-4 rounded-lg glass-panel border border-border/50 space-y-2">
-                <Button variant="outline" size="sm" className="w-full" disabled>
-                  Test Connection
-                </Button>
-                <Button variant="outline" size="sm" className="w-full" disabled>
-                  View Debug Logs
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={handleTestConnection}
+                  disabled={!backendConfig || testing}
+                >
+                  {testing ? 'Testing...' : 'Test Connection'}
                 </Button>
               </div>
             </div>
