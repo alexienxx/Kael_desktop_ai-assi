@@ -5,6 +5,7 @@ import { ChatWindow } from '@/components/ChatWindow'
 import { Composer } from '@/components/Composer'
 import { SettingsPanel } from '@/components/SettingsPanel'
 import { MediaPanel } from '@/components/MediaPanel'
+import { ControlCenter } from '@/components/ControlCenter'
 import { Message, Conversation, ThemeSettings, DownloadedMedia } from '@/lib/types'
 import { defaultThemeSettings, applyThemeSettings, getBubbleClasses } from '@/lib/theme-config'
 import { Toaster } from '@/components/ui/sonner'
@@ -18,6 +19,7 @@ function App() {
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [mediaOpen, setMediaOpen] = useState(false)
+  const [controlCenterOpen, setControlCenterOpen] = useState(false)
 
   useEffect(() => {
     applyThemeSettings(themeSettings || defaultThemeSettings)
@@ -105,6 +107,7 @@ function App() {
         onNewChat={handleNewChat}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenMedia={() => setMediaOpen(true)}
+        onOpenControlCenter={() => setControlCenterOpen(true)}
       />
 
       <div className="flex-1 flex flex-col">
@@ -132,6 +135,11 @@ function App() {
         open={mediaOpen}
         onOpenChange={setMediaOpen}
         media={downloadedMedia || []}
+      />
+
+      <ControlCenter
+        open={controlCenterOpen}
+        onOpenChange={setControlCenterOpen}
       />
 
       <Toaster position="top-right" />

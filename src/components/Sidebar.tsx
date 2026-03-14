@@ -1,4 +1,4 @@
-import { Plus, MagnifyingGlass, Gear, Folder } from '@phosphor-icons/react'
+import { Plus, MagnifyingGlass, Gear, Folder, Cpu } from '@phosphor-icons/react'
 import { Conversation } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,6 +13,7 @@ interface SidebarProps {
   onNewChat: () => void
   onOpenSettings: () => void
   onOpenMedia: () => void
+  onOpenControlCenter: () => void
 }
 
 export function Sidebar({
@@ -21,7 +22,8 @@ export function Sidebar({
   onSelectConversation,
   onNewChat,
   onOpenSettings,
-  onOpenMedia
+  onOpenMedia,
+  onOpenControlCenter,
 }: SidebarProps) {
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -87,6 +89,15 @@ export function Sidebar({
       </ScrollArea>
 
       <div className="p-4 border-t border-border/50 space-y-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onOpenControlCenter}
+          className="w-full justify-start hover:bg-accent/30"
+        >
+          <Cpu className="h-4 w-4 mr-2" />
+          Control Center
+        </Button>
         <Button
           variant="ghost"
           size="sm"
