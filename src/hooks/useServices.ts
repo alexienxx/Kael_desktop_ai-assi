@@ -7,6 +7,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { servicesApi } from '@/services/servicesApi'
+import { githubAgenticService } from '@/services/githubAgenticService'
 import type { Service } from '@/lib/types'
 
 export interface UseServicesResult {
@@ -30,11 +31,20 @@ export function useServices(): UseServicesResult {
     setError(null)
     try {
       const data = await servicesApi.getServices()
-      setServices(data)
+      // If backend returns no services, use mock data for development
+      if (data.length === 0) {
+        const mockGitHubService = githubAgenticService.getMockGitHubService()
+        setServices([mockGitHubService])
+      } else {
+        setServices(data)
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load services'
       setError(message)
-      console.error('Failed to fetch services:', err)
+      console.warn('Failed to fetch services, using mock data:', err)
+      // Fallback to mock data
+      const mockGitHubService = githubAgenticService.getMockGitHubService()
+      setServices([mockGitHubService])
     } finally {
       setLoading(false)
     }
