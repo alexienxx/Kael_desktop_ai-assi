@@ -2,13 +2,15 @@
  * Services API
  *
  * Provides backend integration for the Services hub.
- * Handles service discovery, connection status, and agentic action requests.
+ * Handles repo-awareness status and agentic action requests via the
+ * backend's `/agentic/repo/*` endpoints.
  *
  * This layer delegates to the backend for all service-related operations
  * and does not implement any service logic locally.
  */
 
 import { transportFetchJson } from './backendTransport'
+import { ENDPOINTS } from './backendContract'
 import type {
   Service,
   AgenticActionRequest,
@@ -16,28 +18,12 @@ import type {
   ServiceProvider
 } from '@/lib/types'
 
-// ── Service API endpoints ─────────────────────────────────────────────────────
-
-const SERVICES_ENDPOINTS = {
-  /** Get list of available services and their connection status */
-  SERVICES_LIST: '/services',
-  /** Get service details by ID */
-  SERVICE_DETAIL: (serviceId: string) => `/services/${serviceId}`,
-  /** Execute an agentic action */
-  AGENTIC_ACTION: '/services/agentic-action',
-  /** GitHub-specific endpoints */
-  GITHUB_REPOS: '/services/github/repos',
-  GITHUB_REPO_DETAIL: (owner: string, repo: string) => `/services/github/repos/${owner}/${repo}`,
-} as const
-
 // ── Request / Response types ──────────────────────────────────────────────────
 
-export interface GetServicesResponse {
-  services: Service[]
-}
-
-export interface GetServiceDetailResponse {
-  service: Service
+export interface RepoStatusResponse {
+  repos: GitHubRepo[]
+  github_connected: boolean
+  account_label?: string
 }
 
 export interface AgenticActionResponse {
@@ -45,14 +31,6 @@ export interface AgenticActionResponse {
   actionId: string
   result?: Record<string, unknown>
   message?: string
-}
-
-export interface GetGitHubReposResponse {
-  repos: GitHubRepo[]
-}
-
-export interface GetGitHubRepoDetailResponse {
-  repo: GitHubRepo
 }
 
 // ── Helper functions ──────────────────────────────────────────────────────────
@@ -73,117 +51,80 @@ function asBoolean(value: unknown, fallback: boolean): boolean {
 /**
  * Services API
  *
- * Handles all backend communication for the Services hub.
- * Uses backendTransport for consistent error handling and auth.
+ * Handles all backend communication for the Services hub via the
+ * `/agentic/repo/*` endpoints. Uses backendTransport for consistent
+ * error handling and auth.
  */
 export class ServicesApi {
   /**
-   * Get list of available services
-   * Maps to: GET /services
+   * Get repo-awareness status and available repositories
+   * Maps to: GET /agentic/repo/status
+   *
+   * Returns GitHub connection status and available repos.
+   * Degrades gracefully if endpoint is unavailable.
    */
-  async getServices(): Promise<Service[]> {
+  async getRepoStatus(): Promise<RepoStatusResponse> {
     try {
       const data = await transportFetchJson<Record<string, unknown>>(
-        SERVICES_ENDPOINTS.SERVICES_LIST,
+        ENDPOINTS.AGENTIC_REPO_STATUS,
         { method: 'GET' }
       )
 
-      const services = Array.isArray(data.services) ? data.services : []
-
-      return services.map((svc: any) => ({
-        id: asString(svc.id, `service-${Date.now()}`),
-        provider: asString(svc.provider, 'github') as ServiceProvider,
-        displayName: asString(svc.display_name ?? svc.displayName, 'Unknown Service'),
-        icon: asString(svc.icon, ''),
-        connectionStatus: asString(
-          svc.connection_status ?? svc.connectionStatus,
-          'not_connected'
-        ) as any,
-        accountLabel: typeof svc.account_label === 'string'
-          ? svc.account_label
-          : typeof svc.accountLabel === 'string'
-          ? svc.accountLabel
-          : undefined,
-        capabilities: Array.isArray(svc.capabilities)
-          ? svc.capabilities.map((cap: any) => ({
-              id: asString(cap.id, ''),
-              label: asString(cap.label, ''),
-              enabled: asBoolean(cap.enabled, false),
-            }))
-          : [],
-        scopes: Array.isArray(svc.scopes) ? svc.scopes : undefined,
-      }))
-    } catch (err) {
-      console.warn('Failed to fetch services, returning empty list:', err)
-      return []
-    }
-  }
-
-  /**
-   * Get service details by ID
-   * Maps to: GET /services/:id
-   */
-  async getServiceDetail(serviceId: string): Promise<Service | null> {
-    try {
-      const data = await transportFetchJson<Record<string, unknown>>(
-        SERVICES_ENDPOINTS.SERVICE_DETAIL(serviceId),
-        { method: 'GET' }
-      )
-
-      const svc = data.service as any
-      if (!svc) return null
+      const repos = Array.isArray(data.repos) ? data.repos : []
 
       return {
-        id: asString(svc.id, serviceId),
-        provider: asString(svc.provider, 'github') as ServiceProvider,
-        displayName: asString(svc.display_name ?? svc.displayName, 'Unknown Service'),
-        icon: asString(svc.icon, ''),
-        connectionStatus: asString(
-          svc.connection_status ?? svc.connectionStatus,
-          'not_connected'
-        ) as any,
-        accountLabel: typeof svc.account_label === 'string'
-          ? svc.account_label
-          : typeof svc.accountLabel === 'string'
-          ? svc.accountLabel
-          : undefined,
-        capabilities: Array.isArray(svc.capabilities)
-          ? svc.capabilities.map((cap: any) => ({
-              id: asString(cap.id, ''),
-              label: asString(cap.label, ''),
-              enabled: asBoolean(cap.enabled, false),
-            }))
-          : [],
-        scopes: Array.isArray(svc.scopes) ? svc.scopes : undefined,
+        github_connected: asBoolean(data.github_connected, false),
+        account_label: typeof data.account_label === 'string' ? data.account_label : undefined,
+        repos: repos.map((repo: any) => ({
+          owner: asString(repo.owner, ''),
+          name: asString(repo.name, ''),
+          fullName: asString(repo.full_name ?? repo.fullName, ''),
+          type: asString(repo.type, 'generic') as any,
+          url: asString(repo.url, ''),
+          description: typeof repo.description === 'string' ? repo.description : undefined,
+          isPrivate: typeof repo.is_private === 'boolean'
+            ? repo.is_private
+            : typeof repo.isPrivate === 'boolean'
+            ? repo.isPrivate
+            : undefined,
+          lastUpdated: typeof repo.last_updated === 'string'
+            ? new Date(repo.last_updated)
+            : typeof repo.lastUpdated === 'string'
+            ? new Date(repo.lastUpdated)
+            : undefined,
+        })),
       }
     } catch (err) {
-      console.warn(`Failed to fetch service detail for ${serviceId}:`, err)
-      return null
+      console.warn('Failed to fetch repo status, returning empty state:', err)
+      return {
+        github_connected: false,
+        repos: [],
+      }
     }
   }
 
   /**
-   * Execute an agentic action
-   * Maps to: POST /services/agentic-action
+   * Execute a repo analyze action
+   * Maps to: POST /agentic/repo/analyze
    *
+   * Performs general repo analysis (repo_scan, pr_review, issue_review modes).
    * Degrades gracefully: if the endpoint is unavailable or the backend
-   * returns an error, a failure response is returned rather than throwing,
-   * so the caller always receives a defined result to surface in the UI.
+   * returns an error, a failure response is returned rather than throwing.
    */
-  async executeAgenticAction(request: AgenticActionRequest): Promise<AgenticActionResponse> {
+  async analyzeRepo(
+    target: string,
+    mode: 'repo_scan' | 'pr_review' | 'issue_review',
+    metadata?: Record<string, unknown>
+  ): Promise<AgenticActionResponse> {
     try {
       const data = await transportFetchJson<Record<string, unknown>>(
-        SERVICES_ENDPOINTS.AGENTIC_ACTION,
+        ENDPOINTS.AGENTIC_REPO_ANALYZE,
         {
           method: 'POST',
           body: JSON.stringify({
-            service_id: request.serviceId,
-            action: request.action,
-            target: request.target,
-            mode: request.mode,
-            correlate_with_diagnostics: request.correlateWithDiagnostics,
-            draft_issue: request.draftIssue,
-            metadata: request.metadata,
+            target,
+            mode,
+            metadata,
           }),
         }
       )
@@ -195,88 +136,140 @@ export class ServicesApi {
         message: typeof data.message === 'string' ? data.message : undefined,
       }
     } catch (err) {
-      console.warn('Agentic action endpoint unavailable:', err)
+      console.warn('Repo analyze endpoint unavailable:', err)
       return {
         success: false,
         actionId: '',
-        message: err instanceof Error ? err.message : 'Agentic service endpoint unavailable',
+        message: err instanceof Error ? err.message : 'Repo analyze endpoint unavailable',
       }
     }
   }
 
   /**
-   * Get GitHub repositories for the connected account
-   * Maps to: GET /services/github/repos
+   * Execute a self-repo audit action
+   * Maps to: POST /agentic/repo/self_audit
+   *
+   * Performs self-repo audit (self_repo_scan, self_repo_diagnostics_correlation modes).
+   * Degrades gracefully: if the endpoint is unavailable or the backend
+   * returns an error, a failure response is returned rather than throwing.
    */
-  async getGitHubRepos(): Promise<GitHubRepo[]> {
+  async selfAuditRepo(
+    target: string,
+    mode: 'self_repo_scan' | 'self_repo_diagnostics_correlation',
+    correlateWithDiagnostics?: boolean,
+    metadata?: Record<string, unknown>
+  ): Promise<AgenticActionResponse> {
     try {
       const data = await transportFetchJson<Record<string, unknown>>(
-        SERVICES_ENDPOINTS.GITHUB_REPOS,
-        { method: 'GET' }
+        ENDPOINTS.AGENTIC_REPO_SELF_AUDIT,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            target,
+            mode,
+            correlate_with_diagnostics: correlateWithDiagnostics,
+            metadata,
+          }),
+        }
       )
-
-      const repos = Array.isArray(data.repos) ? data.repos : []
-
-      return repos.map((repo: any) => ({
-        owner: asString(repo.owner, ''),
-        name: asString(repo.name, ''),
-        fullName: asString(repo.full_name ?? repo.fullName, ''),
-        type: asString(repo.type, 'generic') as any,
-        url: asString(repo.url, ''),
-        description: typeof repo.description === 'string' ? repo.description : undefined,
-        isPrivate: typeof repo.is_private === 'boolean'
-          ? repo.is_private
-          : typeof repo.isPrivate === 'boolean'
-          ? repo.isPrivate
-          : undefined,
-        lastUpdated: typeof repo.last_updated === 'string'
-          ? new Date(repo.last_updated)
-          : typeof repo.lastUpdated === 'string'
-          ? new Date(repo.lastUpdated)
-          : undefined,
-      }))
-    } catch (err) {
-      console.warn('Failed to fetch GitHub repos, returning empty list:', err)
-      return []
-    }
-  }
-
-  /**
-   * Get GitHub repository details
-   * Maps to: GET /services/github/repos/:owner/:repo
-   */
-  async getGitHubRepoDetail(owner: string, name: string): Promise<GitHubRepo | null> {
-    try {
-      const data = await transportFetchJson<Record<string, unknown>>(
-        SERVICES_ENDPOINTS.GITHUB_REPO_DETAIL(owner, name),
-        { method: 'GET' }
-      )
-
-      const repo = data.repo as any
-      if (!repo) return null
 
       return {
-        owner: asString(repo.owner, owner),
-        name: asString(repo.name, name),
-        fullName: asString(repo.full_name ?? repo.fullName, `${owner}/${name}`),
-        type: asString(repo.type, 'generic') as any,
-        url: asString(repo.url, ''),
-        description: typeof repo.description === 'string' ? repo.description : undefined,
-        isPrivate: typeof repo.is_private === 'boolean'
-          ? repo.is_private
-          : typeof repo.isPrivate === 'boolean'
-          ? repo.isPrivate
-          : undefined,
-        lastUpdated: typeof repo.last_updated === 'string'
-          ? new Date(repo.last_updated)
-          : typeof repo.lastUpdated === 'string'
-          ? new Date(repo.lastUpdated)
-          : undefined,
+        success: asBoolean(data.success, false),
+        actionId: asString(data.action_id ?? data.actionId, `action-${Date.now()}`),
+        result: typeof data.result === 'object' ? data.result as Record<string, unknown> : undefined,
+        message: typeof data.message === 'string' ? data.message : undefined,
       }
     } catch (err) {
-      console.warn(`Failed to fetch GitHub repo detail for ${owner}/${name}:`, err)
-      return null
+      console.warn('Self-audit endpoint unavailable:', err)
+      return {
+        success: false,
+        actionId: '',
+        message: err instanceof Error ? err.message : 'Self-audit endpoint unavailable',
+      }
     }
+  }
+
+  /**
+   * Draft an issue based on repo analysis
+   * Maps to: POST /agentic/repo/draft_issue
+   *
+   * Creates an issue draft based on repo analysis results.
+   * Degrades gracefully: if the endpoint is unavailable or the backend
+   * returns an error, a failure response is returned rather than throwing.
+   */
+  async draftIssue(
+    target: string,
+    metadata?: Record<string, unknown>
+  ): Promise<AgenticActionResponse> {
+    try {
+      const data = await transportFetchJson<Record<string, unknown>>(
+        ENDPOINTS.AGENTIC_REPO_DRAFT_ISSUE,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            target,
+            mode: 'issue_draft',
+            metadata,
+          }),
+        }
+      )
+
+      return {
+        success: asBoolean(data.success, false),
+        actionId: asString(data.action_id ?? data.actionId, `action-${Date.now()}`),
+        result: typeof data.result === 'object' ? data.result as Record<string, unknown> : undefined,
+        message: typeof data.message === 'string' ? data.message : undefined,
+      }
+    } catch (err) {
+      console.warn('Draft issue endpoint unavailable:', err)
+      return {
+        success: false,
+        actionId: '',
+        message: err instanceof Error ? err.message : 'Draft issue endpoint unavailable',
+      }
+    }
+  }
+
+  /**
+   * Legacy method for backward compatibility with useServices hook.
+   * Constructs a minimal Service[] array from repo status.
+   *
+   * @deprecated Use getRepoStatus() directly for new code.
+   */
+  async getServices(): Promise<Service[]> {
+    const status = await this.getRepoStatus()
+
+    if (!status.github_connected) {
+      return []
+    }
+
+    return [
+      {
+        id: 'github-service',
+        provider: 'github',
+        displayName: 'GitHub',
+        icon: 'github',
+        connectionStatus: 'connected',
+        accountLabel: status.account_label,
+        capabilities: [
+          { id: 'repo-audit', label: 'Repo audit', enabled: true },
+          { id: 'pr-review', label: 'PR review', enabled: true },
+          { id: 'issue-drafting', label: 'Issue drafting', enabled: true },
+          { id: 'self-repo-aware', label: 'Self-repo aware', enabled: true },
+        ],
+        scopes: ['repo', 'read:user'],
+      },
+    ]
+  }
+
+  /**
+   * Legacy method for backward compatibility with useGitHubService hook.
+   *
+   * @deprecated Use getRepoStatus() directly for new code.
+   */
+  async getGitHubRepos(): Promise<GitHubRepo[]> {
+    const status = await this.getRepoStatus()
+    return status.repos
   }
 }
 
