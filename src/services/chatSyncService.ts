@@ -42,6 +42,7 @@ export type SyncStatus = 'idle' | 'restoring' | 'reconciling' | 'live' | 'error'
 export class ChatSyncService {
   private historyService: ChatHistoryService | null = null
   private eventsService: ChatEventsService
+  private currentConversationId?: string
 
   private historyListeners: Set<HistoryRestoreListener> = new Set()
   private messageListeners: Set<MessageArrivedListener> = new Set()
@@ -65,12 +66,14 @@ export class ChatSyncService {
    * @param conversationId  Optional active conversation to scope requests to.
    */
   async connect(conversationId?: string): Promise<void> {
+    this.currentConversationId = conversationId
+
     // Build a fresh adapter – it reads config from backendConfigStore.
     const adapter = new BackendContractAdapter()
     this.historyService = new ChatHistoryService(adapter)
 
     // (Re)subscribe to SSE
-    this._startSSE()
+    await this._startSSE(conversationId)
 
     // Restore history from backend truth
     await this._restoreHistory(conversationId)
@@ -176,12 +179,13 @@ export class ChatSyncService {
     this.syncStatus = 'live'
   }
 
-  private _startSSE(): void {
+  private async _startSSE(conversationId?: string): Promise<void> {
     this._stopSSE()
 
     if (!backendConfigStore.isConfigured()) return
 
-    this.eventsService.subscribe()
+    // Subscribe with conversationId for scoped SSE stream
+    await this.eventsService.subscribe(conversationId)
 
     this.unsubscribeEvents = this.eventsService.onEvent((event) => {
       // We only care about incoming message events from the backend

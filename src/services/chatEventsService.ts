@@ -2,17 +2,21 @@
  * Chat Events Service
  *
  * Subscribes to the backend's Server-Sent Events (SSE) stream at
- * GET /chat/events and surfaces backend-driven messages (autonomous responses,
- * status changes) to the desktop UI in realtime.
+ * GET /chat/events using token-based authentication.
+ *
+ * Authentication flow:
+ * 1. Request a short-lived single-use token via POST /chat/events/token
+ * 2. Open EventSource with ?token=... query parameter
+ * 3. On reconnect, obtain a fresh token (tokens are single-use)
  *
  * Design constraints:
  * - SSE failure MUST NOT crash the app; errors are swallowed + logged
- * - Reconnect is handled automatically by the browser's EventSource
+ * - Reconnect requires a fresh token acquisition
  * - Deduplication is the caller's responsibility (see ChatSyncService)
  * - No React coupling: this is a plain service class
  */
 
-import { ENDPOINTS, ChatEvent } from './backendContract'
+import { ENDPOINTS, ChatEvent, BackendContractAdapter } from './backendContract'
 import { backendConfigStore } from './backendConfigStore'
 
 export type ChatEventListener = (event: ChatEvent) => void
@@ -21,13 +25,18 @@ export class ChatEventsService {
   private eventSource: EventSource | null = null
   private listeners: Set<ChatEventListener> = new Set()
   private active = false
+  private adapter: BackendContractAdapter = new BackendContractAdapter()
+  private conversationId?: string
 
   /**
-   * Subscribe to backend SSE.
+   * Subscribe to backend SSE using token-based authentication.
    * Safe to call multiple times; a running subscription is stopped first.
+   *
+   * @param conversationId Optional conversation ID for scoped SSE stream
    */
-  subscribe(): void {
+  async subscribe(conversationId?: string): Promise<void> {
     this.unsubscribe()
+    this.conversationId = conversationId
 
     const baseUrl = backendConfigStore.getBaseUrl()
     if (!baseUrl) {
@@ -35,20 +44,26 @@ export class ChatEventsService {
       return
     }
 
-    const normalizedBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl
-    const url = `${normalizedBase}${ENDPOINTS.CHAT_EVENTS}`
+    // Request a short-lived SSE token from the backend
+    let token: string
+    try {
+      const tokenResponse = await this.adapter.requestChatEventsToken(conversationId)
+      token = tokenResponse.token
+      if (!token) {
+        console.warn('[chatEventsService] Token request returned empty token')
+        return
+      }
+    } catch (err) {
+      console.warn('[chatEventsService] Failed to obtain SSE token:', err)
+      // Gracefully degrade: SSE unavailable but don't crash the app
+      return
+    }
 
-    // Inject API key via URL param when present.
-    // NOTE: EventSource does not support custom HTTP headers in browsers, so
-    // the API key must be passed as a query parameter when server-side log
-    // redaction of sensitive query parameters is confirmed to be in place.
-    const apiKey = backendConfigStore.getApiKey()
-    const finalUrl = apiKey
-      ? `${url}?api_key=${encodeURIComponent(apiKey)}`
-      : url
+    const normalizedBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl
+    const url = `${normalizedBase}${ENDPOINTS.CHAT_EVENTS}?token=${encodeURIComponent(token)}`
 
     try {
-      this.eventSource = new EventSource(finalUrl)
+      this.eventSource = new EventSource(url)
       this.active = true
 
       this.eventSource.onmessage = (event: MessageEvent) => {
@@ -72,9 +87,21 @@ export class ChatEventsService {
       })
 
       this.eventSource.onerror = (err) => {
-        // EventSource automatically attempts reconnect on network errors.
-        // We just log so the app can observe without crashing.
-        console.warn('[chatEventsService] SSE error (will auto-reconnect):', err)
+        // EventSource will attempt to reconnect automatically, but since
+        // tokens are single-use, we need to obtain a fresh token.
+        // Close the current connection and resubscribe with a new token.
+        console.warn('[chatEventsService] SSE error, will reconnect with fresh token:', err)
+        this.unsubscribe()
+
+        // Attempt to reconnect after a short delay
+        setTimeout(() => {
+          if (!this.active) {
+            // Only reconnect if we haven't been explicitly unsubscribed
+            this.subscribe(this.conversationId).catch((reconnectErr) => {
+              console.error('[chatEventsService] Failed to reconnect:', reconnectErr)
+            })
+          }
+        }, 3000) // 3 second delay before reconnect attempt
       }
     } catch (err) {
       console.error('[chatEventsService] Failed to create EventSource:', err)
