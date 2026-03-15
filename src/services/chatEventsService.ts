@@ -38,7 +38,10 @@ export class ChatEventsService {
     const normalizedBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl
     const url = `${normalizedBase}${ENDPOINTS.CHAT_EVENTS}`
 
-    // Inject API key via URL param when present (EventSource cannot set headers)
+    // Inject API key via URL param when present.
+    // NOTE: EventSource does not support custom HTTP headers in browsers, so
+    // the API key must be passed as a query parameter when server-side log
+    // redaction of sensitive query parameters is confirmed to be in place.
     const apiKey = backendConfigStore.getApiKey()
     const finalUrl = apiKey
       ? `${url}?api_key=${encodeURIComponent(apiKey)}`

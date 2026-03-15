@@ -32,6 +32,12 @@ function App() {
 
   // Track the previous connection status so we can detect reconnects
   const prevConnectionStatus = useRef<ConnectionStatus>('disconnected')
+  // Keep a ref to the current messages so connection/reconnect handlers can
+  // seed the sync service with the latest local state without a stale closure.
+  const messagesRef = useRef<Message[]>(messages || [])
+  useEffect(() => {
+    messagesRef.current = messages || []
+  }, [messages])
 
   // Apply theme settings on mount and change
   useEffect(() => {
@@ -68,7 +74,9 @@ function App() {
             console.warn('[App] Pending reconciliation failed:', err)
           })
         } else {
-          // Fresh connect: restore full history
+          // Fresh connect: seed local KV messages as known so they are not
+          // duplicated when backend history arrives, then restore full history.
+          chatSyncService.seedKnownIds(messagesRef.current)
           chatSyncService.connect(convId).catch((err) => {
             console.warn('[App] Chat sync connect failed:', err)
           })
@@ -135,22 +143,13 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Seed known IDs from existing local messages so sync service avoids
-  // re-emitting messages that are already in local KV state.
-  useEffect(() => {
-    if (messages && messages.length > 0) {
-      chatSyncService.seedKnownIds(messages)
-    }
-  // Only run once on mount (or when messages first loads from KV)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   // Sync active conversation with conversation manager
   useEffect(() => {
     if (activeConversationId) {
       conversationManager.setActiveConversationId(activeConversationId)
       // When switching conversations while connected, restore history for the new one
       if (backendService.isConnected()) {
+        chatSyncService.seedKnownIds(messagesRef.current)
         chatSyncService.connect(activeConversationId).catch((err) => {
           console.warn('[App] Chat sync on conversation switch failed:', err)
         })
