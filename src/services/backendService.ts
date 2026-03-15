@@ -3,14 +3,17 @@
  *
  * Singleton service for managing backend communication:
  * - Configuration management with hot reload
- * - Connection status tracking
+ * - Connection status tracking (connected / connecting / disconnected /
+ *   error / auth_failed / degraded)
  * - Automatic reconnect with exponential backoff
  * - Request cancellation on reconfiguration
  * - Streaming support (prepared but not enabled)
  */
 
 import { BackendConfig, ConnectionStatus } from '@/lib/types'
-import { BackendContractAdapter } from './backendContract'
+import { BackendContractAdapter, resolveMediaUrl } from './backendContract'
+import { backendConfigStore } from './backendConfigStore'
+import { TransportError } from './backendTransport'
 import { conversationManager } from './conversationManager'
 
 type ConnectionStatusListener = (status: ConnectionStatus) => void
@@ -18,7 +21,10 @@ type ConnectionStatusListener = (status: ConnectionStatus) => void
 /**
  * Backend Service
  *
- * Manages all backend communication with automatic reconnection and configuration updates.
+ * Manages all backend communication with automatic reconnection and
+ * configuration updates.  Uses backendConfigStore as the single source of
+ * backend configuration truth – both this service and the Control Center
+ * diagnostic service read from that store.
  */
 export class BackendService {
   private adapter: BackendContractAdapter | null = null
@@ -30,8 +36,8 @@ export class BackendService {
   private reconnectAttempts = 0
   private maxReconnectAttempts = 5
   private reconnectTimeouts = [2000, 5000, 10000, 15000, 30000] // Backoff: 2s, 5s, 10s, 15s, 30s
-  private reconnectTimer: NodeJS.Timeout | null = null
-  private healthCheckInterval: NodeJS.Timeout | null = null
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private healthCheckInterval: ReturnType<typeof setInterval> | null = null
 
   // Request cancellation
   private pendingRequests: Set<AbortController> = new Set()
@@ -41,7 +47,9 @@ export class BackendService {
   }
 
   /**
-   * Configure the backend service
+   * Configure the backend service.
+   * Also updates backendConfigStore so that diagnostic services share the
+   * same configuration without reading from KV independently.
    */
   configure(config: BackendConfig): void {
     const isReconfiguration = this.config !== null
@@ -54,11 +62,14 @@ export class BackendService {
     }
 
     this.config = config
-    this.adapter = new BackendContractAdapter(
-      config.baseUrl,
-      config.apiKey,
-      config.timeout
-    )
+
+    // Propagate to the canonical config store so other services (e.g.
+    // controlCenterService) automatically pick up the new settings.
+    backendConfigStore.set(config)
+
+    // The adapter is now stateless – it reads config from backendConfigStore
+    // via backendTransport, so we only need a single shared instance.
+    this.adapter = new BackendContractAdapter()
 
     // Update connection status
     this.setConnectionStatus('connecting')
@@ -70,9 +81,11 @@ export class BackendService {
         this.reconnectAttempts = 0
         this.startHealthCheck()
       })
-      .catch(() => {
-        this.setConnectionStatus('error')
-        this.startReconnect()
+      .catch((err) => {
+        this.setConnectionStatus(this.classifyError(err))
+        if (this.connectionStatus !== 'auth_failed') {
+          this.startReconnect()
+        }
       })
   }
 
@@ -86,6 +99,7 @@ export class BackendService {
 
     this.adapter = null
     this.config = null
+    backendConfigStore.set(null)
     this.setConnectionStatus('disconnected')
     this.reconnectAttempts = 0
 
@@ -260,13 +274,21 @@ export class BackendService {
   }
 
   /**
-   * Get media URL
+   * Resolve a media reference to an absolute URL.
+   * Delegates to the centralized resolveMediaUrl in backendContract.
+   */
+  resolveMediaUrl(type: 'image' | 'audio', ref: string): string | null {
+    const baseUrl = backendConfigStore.getBaseUrl()
+    if (!baseUrl) return null
+    return resolveMediaUrl(type, ref, baseUrl)
+  }
+
+  /**
+   * @deprecated Use resolveMediaUrl instead.
+   * Kept for backwards compatibility until all callers are updated.
    */
   getMediaUrl(type: 'image' | 'audio', id: string): string | null {
-    if (!this.adapter) {
-      return null
-    }
-    return this.adapter.getMediaUrl(type, id)
+    return this.resolveMediaUrl(type, id)
   }
 
   /**
@@ -277,11 +299,7 @@ export class BackendService {
       throw new Error('Backend not configured')
     }
 
-    try {
-      await this.adapter.healthCheck()
-    } catch (error) {
-      throw error
-    }
+    await this.adapter.healthCheck()
   }
 
   /**
@@ -291,9 +309,13 @@ export class BackendService {
     // Check every 30 seconds
     this.healthCheckInterval = setInterval(() => {
       if (this.adapter && this.connectionStatus === 'connected') {
-        this.performHealthCheck().catch(() => {
-          this.setConnectionStatus('error')
-          this.startReconnect()
+        this.performHealthCheck().catch((err) => {
+          const status = this.classifyError(err)
+          this.setConnectionStatus(status)
+          if (status !== 'auth_failed') {
+            this.stopHealthCheck()
+            this.startReconnect()
+          }
         })
       }
     }, 30000)
@@ -337,9 +359,12 @@ export class BackendService {
           this.reconnectAttempts = 0
           this.startHealthCheck()
         })
-        .catch(() => {
-          this.setConnectionStatus('error')
-          this.startReconnect()
+        .catch((err) => {
+          const status = this.classifyError(err)
+          this.setConnectionStatus(status)
+          if (status !== 'auth_failed') {
+            this.startReconnect()
+          }
         })
     }, timeout)
   }
@@ -356,15 +381,29 @@ export class BackendService {
   }
 
   /**
+   * Classify an error into the appropriate ConnectionStatus.
+   */
+  private classifyError(error: unknown): ConnectionStatus {
+    if (error instanceof TransportError) {
+      if (error.kind === 'auth_failed') return 'auth_failed'
+      if (error.kind === 'timeout' || error.kind === 'network') return 'error'
+    }
+    return 'error'
+  }
+
+  /**
    * Handle connection errors
    */
   private handleConnectionError(error: unknown): void {
     console.error('Backend connection error:', error)
 
+    const newStatus = this.classifyError(error)
     if (this.connectionStatus === 'connected') {
-      this.setConnectionStatus('error')
+      this.setConnectionStatus(newStatus)
       this.stopHealthCheck()
-      this.startReconnect()
+      if (newStatus !== 'auth_failed') {
+        this.startReconnect()
+      }
     }
   }
 

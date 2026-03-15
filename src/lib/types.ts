@@ -60,7 +60,14 @@ export interface DownloadedMedia {
   messageId: string
 }
 
-export type ConnectionStatus = 'connected' | 'connecting' | 'disconnected' | 'error'
+export type ConnectionStatus =
+  | 'connected'
+  | 'connecting'
+  | 'disconnected'
+  | 'error'
+  | 'auth_failed'
+  | 'degraded'
+  | 'partial'
 
 export interface BackendConfig {
   baseUrl: string

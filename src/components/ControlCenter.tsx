@@ -1,15 +1,15 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useKV } from '@github/spark/hooks'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { BackendConfig, IdentityData, DriftData, MemoryData, RuntimeData, AutonomyEvent, CognitiveEvent } from '@/lib/types'
+import { IdentityData, DriftData, MemoryData, RuntimeData, AutonomyEvent, CognitiveEvent } from '@/lib/types'
 import {
   fetchIdentity, fetchDrift, fetchMemory, fetchRuntime, fetchAutonomy,
   MOCK_IDENTITY, MOCK_DRIFT, MOCK_MEMORY, MOCK_RUNTIME, MOCK_AUTONOMY, MOCK_COGNITIVE_EVENTS,
 } from '@/services/controlCenterService'
+import { backendConfigStore } from '@/services/backendConfigStore'
 import { CognitiveFlowPanel } from '@/panels/CognitiveFlowPanel'
 import { IdentityPanel } from '@/panels/IdentityPanel'
 import { DriftPanel } from '@/panels/DriftPanel'
@@ -26,10 +26,17 @@ interface ControlCenterProps {
 const POLL_INTERVAL_MS = 5000
 
 export function ControlCenter({ open, onOpenChange }: ControlCenterProps) {
-  const [backendConfig] = useKV<BackendConfig>('kael-backend-config', {
-    baseUrl: '',
-    timeout: 10000,
-  })
+  // Read backend config from the canonical store instead of KV directly.
+  // This ensures Control Center and the chat service share the same config.
+  const [hasBackend, setHasBackend] = useState(() => backendConfigStore.isConfigured())
+
+  useEffect(() => {
+    // Keep hasBackend in sync when config is updated via SettingsPanel
+    const unsubscribe = backendConfigStore.subscribe((config) => {
+      setHasBackend(Boolean(config?.baseUrl?.trim()))
+    })
+    return unsubscribe
+  }, [])
 
   const [identity, setIdentity] = useState<IdentityData | null>(MOCK_IDENTITY)
   const [drift, setDrift] = useState<DriftData | null>(MOCK_DRIFT)
@@ -41,18 +48,15 @@ export function ControlCenter({ open, onOpenChange }: ControlCenterProps) {
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
 
   const refresh = useCallback(async () => {
-    const baseUrl = backendConfig?.baseUrl?.trim()
-    if (!baseUrl) return
-
-    const apiKey = backendConfig?.apiKey
+    if (!backendConfigStore.isConfigured()) return
 
     try {
       const [id, dr, mem, rt, auto] = await Promise.allSettled([
-        fetchIdentity(baseUrl, apiKey),
-        fetchDrift(baseUrl, apiKey),
-        fetchMemory(baseUrl, apiKey),
-        fetchRuntime(baseUrl, apiKey),
-        fetchAutonomy(baseUrl, apiKey),
+        fetchIdentity(),
+        fetchDrift(),
+        fetchMemory(),
+        fetchRuntime(),
+        fetchAutonomy(),
       ])
 
       if (id.status === 'fulfilled') setIdentity(id.value)
@@ -73,7 +77,7 @@ export function ControlCenter({ open, onOpenChange }: ControlCenterProps) {
     } catch {
       setIsLive(false)
     }
-  }, [backendConfig])
+  }, [])
 
   // Rotate cognitive events for demo when offline
   useEffect(() => {
@@ -96,8 +100,6 @@ export function ControlCenter({ open, onOpenChange }: ControlCenterProps) {
     const timer = setInterval(refresh, POLL_INTERVAL_MS)
     return () => clearInterval(timer)
   }, [open, refresh])
-
-  const hasBackend = Boolean(backendConfig?.baseUrl?.trim())
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
