@@ -6,7 +6,8 @@ import { Composer } from '@/components/Composer'
 import { SettingsPanel } from '@/components/SettingsPanel'
 import { MediaPanel } from '@/components/MediaPanel'
 import { ControlCenter } from '@/components/ControlCenter'
-import { Message, Conversation, ThemeSettings, DownloadedMedia, BackendConfig, ConnectionStatus } from '@/lib/types'
+import { ServicesPanel } from '@/components/services/ServicesPanel'
+import { Message, Conversation, ThemeSettings, DownloadedMedia, BackendConfig, ConnectionStatus, ServiceContextChip } from '@/lib/types'
 import { defaultThemeSettings, applyThemeSettings, getBubbleClasses } from '@/lib/theme-config'
 import { Toaster } from '@/components/ui/sonner'
 import { toast } from 'sonner'
@@ -26,6 +27,8 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [mediaOpen, setMediaOpen] = useState(false)
   const [controlCenterOpen, setControlCenterOpen] = useState(false)
+  const [servicesOpen, setServicesOpen] = useState(false)
+  const [serviceContextChips, setServiceContextChips] = useState<ServiceContextChip[]>([])
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected')
   const [sending, setSending] = useState(false)
 
@@ -241,6 +244,16 @@ function App() {
     return getBubbleClasses((themeSettings || defaultThemeSettings).bubbleStyle, role)
   }
 
+  const handleServiceContextChange = (context: ServiceContextChip) => {
+    setServiceContextChips((current) => [...current, context])
+    setServicesOpen(false)
+    toast.success(`Service context added: ${context.repoLabel || context.provider}`)
+  }
+
+  const handleRemoveContextChip = (chipId: string) => {
+    setServiceContextChips((current) => current.filter(c => c.id !== chipId))
+  }
+
   return (
     <div className="h-screen overflow-hidden gradient-mesh flex">
       <Sidebar
@@ -259,6 +272,9 @@ function App() {
           themeSettings={themeSettings || defaultThemeSettings}
           bubbleClasses={getBubbleStyleForRole}
           onMediaDownload={handleMediaDownload}
+          onOpenServices={() => setServicesOpen(true)}
+          serviceContextChips={serviceContextChips}
+          onRemoveContextChip={handleRemoveContextChip}
         />
 
         <Composer
@@ -287,6 +303,12 @@ function App() {
       <ControlCenter
         open={controlCenterOpen}
         onOpenChange={setControlCenterOpen}
+      />
+
+      <ServicesPanel
+        open={servicesOpen}
+        onOpenChange={setServicesOpen}
+        onServiceContextChange={handleServiceContextChange}
       />
 
       <Toaster position="top-right" />
