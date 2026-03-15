@@ -3,6 +3,12 @@
  *
  * Provides GitHub-specific service operations and state management.
  * Manages GitHub repos, connection status, and service configuration.
+ *
+ * Graceful degradation contract:
+ * - When the backend /services/github/repos endpoint is unavailable, repos
+ *   remains empty and an error is surfaced to the UI.
+ * - Mock / stub repositories are NEVER injected as a fallback. The backend
+ *   is the sole authority for repo identity and repo type.
  */
 
 import { useState, useEffect, useCallback } from 'react'
@@ -16,7 +22,7 @@ export interface UseGitHubServiceResult {
   error: string | null
   isConnected: boolean
   refetchRepos: () => Promise<void>
-  refetchService: () => Promise<void>
+  refetchService: () => Promise<Service | null>
 }
 
 /**
@@ -46,13 +52,13 @@ export function useGitHubService(): UseGitHubServiceResult {
     setError(null)
     try {
       const data = await githubAgenticService.getRepos()
+      // Reflect exactly what the backend reports – no mock injection.
       setRepos(data)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load repositories'
       setError(message)
       console.error('Failed to fetch GitHub repos:', err)
-      // Fallback to mock repos for development
-      setRepos(githubAgenticService.getMockRepos())
+      setRepos([])
     } finally {
       setLoading(false)
     }

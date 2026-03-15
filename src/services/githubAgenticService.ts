@@ -2,14 +2,14 @@
  * GitHub Agentic Service
  *
  * Provides higher-level GitHub-specific operations for the Services hub.
- * Acts as a convenient wrapper around servicesApi for GitHub operations.
+ * Acts as a convenient wrapper around servicesApi for GitHub operations,
+ * routing to the appropriate `/agentic/repo/*` endpoints based on action mode.
  */
 
 import { servicesApi } from './servicesApi'
 import type {
   Service,
   GitHubRepo,
-  AgenticActionRequest,
   GitHubActionMode,
   RepoType
 } from '@/lib/types'
@@ -33,8 +33,8 @@ export class GitHubAgenticService {
    * Check if GitHub service is connected
    */
   async isGitHubConnected(): Promise<boolean> {
-    const service = await this.getGitHubService()
-    return service?.connectionStatus === 'connected'
+    const status = await servicesApi.getRepoStatus()
+    return status.github_connected
   }
 
   /**
@@ -45,14 +45,12 @@ export class GitHubAgenticService {
   }
 
   /**
-   * Get repository details
-   */
-  async getRepoDetail(owner: string, name: string): Promise<GitHubRepo | null> {
-    return servicesApi.getGitHubRepoDetail(owner, name)
-  }
-
-  /**
    * Execute a GitHub agentic action
+   *
+   * Routes to the appropriate `/agentic/repo/*` endpoint based on mode:
+   * - repo_scan, pr_review, issue_review → /agentic/repo/analyze
+   * - self_repo_scan, self_repo_diagnostics_correlation → /agentic/repo/self_audit
+   * - issue_draft → /agentic/repo/draft_issue
    */
   async executeAction(
     target: string,
@@ -63,22 +61,32 @@ export class GitHubAgenticService {
       metadata?: Record<string, unknown>
     }
   ): Promise<{ success: boolean; actionId: string; message?: string }> {
-    const service = await this.getGitHubService()
-    if (!service) {
-      throw new Error('GitHub service not available')
+    // Route to appropriate endpoint based on mode
+    if (mode === 'issue_draft') {
+      const response = await servicesApi.draftIssue(target, options?.metadata)
+      return {
+        success: response.success,
+        actionId: response.actionId,
+        message: response.message,
+      }
     }
 
-    const request: AgenticActionRequest = {
-      serviceId: service.id,
-      action: 'github_agentic_analysis',
-      target,
-      mode,
-      correlateWithDiagnostics: options?.correlateWithDiagnostics,
-      draftIssue: options?.draftIssue,
-      metadata: options?.metadata,
+    if (mode === 'self_repo_scan' || mode === 'self_repo_diagnostics_correlation') {
+      const response = await servicesApi.selfAuditRepo(
+        target,
+        mode,
+        options?.correlateWithDiagnostics,
+        options?.metadata
+      )
+      return {
+        success: response.success,
+        actionId: response.actionId,
+        message: response.message,
+      }
     }
 
-    const response = await servicesApi.executeAgenticAction(request)
+    // Default to analyzeRepo for generic modes
+    const response = await servicesApi.analyzeRepo(target, mode, options?.metadata)
     return {
       success: response.success,
       actionId: response.actionId,
@@ -88,7 +96,11 @@ export class GitHubAgenticService {
 
   /**
    * Get mock GitHub repos for development/testing
-   * This returns local mock data when backend is not available
+   *
+   * ⚠️  FOR TESTS AND STORYBOOK ONLY – must NOT be used as a production
+   * fallback.  The backend is the sole authority for repo identity and
+   * `RepoType`; injecting these values client-side would fake a ready state
+   * that may not exist on the backend.
    */
   getMockRepos(): GitHubRepo[] {
     return [
@@ -127,6 +139,11 @@ export class GitHubAgenticService {
 
   /**
    * Get mock GitHub service for development/testing
+   *
+   * ⚠️  FOR TESTS AND STORYBOOK ONLY – must NOT be used as a production
+   * fallback.  In particular, the `connectionStatus: 'connected'` value here
+   * is a stub; returning it when the backend is unavailable would fake a
+   * ready state and surface action buttons that cannot actually work.
    */
   getMockGitHubService(): Service {
     return {
@@ -147,7 +164,12 @@ export class GitHubAgenticService {
   }
 
   /**
-   * Determine if a repository is a Kael self-repo based on naming patterns
+   * UI display helper – does NOT determine repo type.
+   *
+   * ⚠️  The `type` field on a `GitHubRepo` object is authoritative and must
+   * come exclusively from the backend response.  This method is a client-side
+   * string-matching heuristic and must not be used to set or override the
+   * `type` property returned by the backend.
    */
   isSelfRepo(repoFullName: string): boolean {
     const lowerName = repoFullName.toLowerCase()
