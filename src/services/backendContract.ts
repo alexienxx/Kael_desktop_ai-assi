@@ -40,6 +40,11 @@ export const ENDPOINTS = {
   CHAT_EVENTS: '/chat/events',
   /** Request short-lived SSE token */
   CHAT_EVENTS_TOKEN: '/chat/events/token',
+  /** Agentic repo-awareness endpoints */
+  AGENTIC_REPO_STATUS: '/agentic/repo/status',
+  AGENTIC_REPO_ANALYZE: '/agentic/repo/analyze',
+  AGENTIC_REPO_SELF_AUDIT: '/agentic/repo/self_audit',
+  AGENTIC_REPO_DRAFT_ISSUE: '/agentic/repo/draft_issue',
 } as const
 
 // ── Media URL resolution ──────────────────────────────────────────────────────
