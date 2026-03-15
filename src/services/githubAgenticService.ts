@@ -88,7 +88,11 @@ export class GitHubAgenticService {
 
   /**
    * Get mock GitHub repos for development/testing
-   * This returns local mock data when backend is not available
+   *
+   * ⚠️  FOR TESTS AND STORYBOOK ONLY – must NOT be used as a production
+   * fallback.  The backend is the sole authority for repo identity and
+   * `RepoType`; injecting these values client-side would fake a ready state
+   * that may not exist on the backend.
    */
   getMockRepos(): GitHubRepo[] {
     return [
@@ -127,6 +131,11 @@ export class GitHubAgenticService {
 
   /**
    * Get mock GitHub service for development/testing
+   *
+   * ⚠️  FOR TESTS AND STORYBOOK ONLY – must NOT be used as a production
+   * fallback.  In particular, the `connectionStatus: 'connected'` value here
+   * is a stub; returning it when the backend is unavailable would fake a
+   * ready state and surface action buttons that cannot actually work.
    */
   getMockGitHubService(): Service {
     return {
@@ -147,7 +156,12 @@ export class GitHubAgenticService {
   }
 
   /**
-   * Determine if a repository is a Kael self-repo based on naming patterns
+   * UI display helper – does NOT determine repo type.
+   *
+   * ⚠️  The `type` field on a `GitHubRepo` object is authoritative and must
+   * come exclusively from the backend response.  This method is a client-side
+   * string-matching heuristic and must not be used to set or override the
+   * `type` property returned by the backend.
    */
   isSelfRepo(repoFullName: string): boolean {
     const lowerName = repoFullName.toLowerCase()

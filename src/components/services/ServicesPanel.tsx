@@ -3,6 +3,14 @@
  *
  * Main Services hub panel that displays connected services,
  * available services, and quick actions.
+ *
+ * Graceful degradation contract:
+ * - When the backend is not configured, a setup prompt is shown instead of
+ *   any service cards, so the UI never appears "ready" without a backend.
+ * - When the backend is configured but the /services endpoint fails, the
+ *   error is surfaced clearly and no fake connected-state is displayed.
+ * - Service cards are only rendered for services explicitly reported as
+ *   connected by the backend.
  */
 
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
@@ -10,7 +18,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { useServices } from '@/hooks/useServices'
 import { GitHubServiceCard } from './GitHubServiceCard'
 import { ServiceCard } from './ServiceCard'
-import { Sparkle } from '@phosphor-icons/react'
+import { Sparkle, WarningCircle, Plugs } from '@phosphor-icons/react'
 
 interface ServicesPanelProps {
   open: boolean
@@ -19,13 +27,14 @@ interface ServicesPanelProps {
 }
 
 export function ServicesPanel({ open, onOpenChange, onServiceContextChange }: ServicesPanelProps) {
-  const { services, loading, error } = useServices()
+  const { services, loading, error, backendConfigured } = useServices()
 
   const connectedServices = services.filter(s => s.connectionStatus === 'connected')
-  const availableServices = services.filter(s => s.connectionStatus !== 'connected')
 
-  // Get GitHub service if available
-  const githubService = services.find(s => s.provider === 'github')
+  // Get GitHub service only if it is explicitly connected per backend
+  const githubService = services.find(
+    s => s.provider === 'github' && s.connectionStatus === 'connected'
+  )
 
   // Placeholder services for future implementation
   const futureServices = [
@@ -59,15 +68,32 @@ export function ServicesPanel({ open, onOpenChange, onServiceContextChange }: Se
               </div>
             )}
 
-            {error && (
-              <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-4 mb-6">
-                <p className="text-sm text-red-400">{error}</p>
+            {/* Backend not configured – show setup prompt, not fake service state */}
+            {!loading && !backendConfigured && (
+              <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/10 p-4 mb-6 flex gap-3">
+                <Plugs size={20} className="text-yellow-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-yellow-300 mb-1">Backend not configured</p>
+                  <p className="text-xs text-yellow-400/80">
+                    Open Settings and add your backend URL to enable agentic services.
+                  </p>
+                </div>
               </div>
             )}
 
-            {!loading && !error && (
+            {error && (
+              <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-4 mb-6 flex gap-3">
+                <WarningCircle size={20} className="text-red-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-red-300 mb-1">Services unavailable</p>
+                  <p className="text-xs text-red-400/80">{error}</p>
+                </div>
+              </div>
+            )}
+
+            {!loading && (
               <div className="space-y-8">
-                {/* Connected Services Section */}
+                {/* Connected Services Section – only shown when backend reports connected */}
                 {connectedServices.length > 0 && (
                   <section>
                     <h3 className="text-sm font-medium text-muted-foreground mb-3 uppercase tracking-wide">
@@ -101,8 +127,8 @@ export function ServicesPanel({ open, onOpenChange, onServiceContextChange }: Se
                   </div>
                 </section>
 
-                {/* Empty state if no services */}
-                {connectedServices.length === 0 && (
+                {/* Empty state – only shown when backend is reachable but nothing is connected */}
+                {backendConfigured && !error && connectedServices.length === 0 && (
                   <div className="text-center py-12">
                     <Sparkle size={48} weight="duotone" className="text-muted-foreground/30 mx-auto mb-4" />
                     <p className="text-sm text-muted-foreground">

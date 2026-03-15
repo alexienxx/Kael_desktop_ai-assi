@@ -165,29 +165,42 @@ export class ServicesApi {
   /**
    * Execute an agentic action
    * Maps to: POST /services/agentic-action
+   *
+   * Degrades gracefully: if the endpoint is unavailable or the backend
+   * returns an error, a failure response is returned rather than throwing,
+   * so the caller always receives a defined result to surface in the UI.
    */
   async executeAgenticAction(request: AgenticActionRequest): Promise<AgenticActionResponse> {
-    const data = await transportFetchJson<Record<string, unknown>>(
-      SERVICES_ENDPOINTS.AGENTIC_ACTION,
-      {
-        method: 'POST',
-        body: JSON.stringify({
-          service_id: request.serviceId,
-          action: request.action,
-          target: request.target,
-          mode: request.mode,
-          correlate_with_diagnostics: request.correlateWithDiagnostics,
-          draft_issue: request.draftIssue,
-          metadata: request.metadata,
-        }),
-      }
-    )
+    try {
+      const data = await transportFetchJson<Record<string, unknown>>(
+        SERVICES_ENDPOINTS.AGENTIC_ACTION,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            service_id: request.serviceId,
+            action: request.action,
+            target: request.target,
+            mode: request.mode,
+            correlate_with_diagnostics: request.correlateWithDiagnostics,
+            draft_issue: request.draftIssue,
+            metadata: request.metadata,
+          }),
+        }
+      )
 
-    return {
-      success: asBoolean(data.success, false),
-      actionId: asString(data.action_id ?? data.actionId, `action-${Date.now()}`),
-      result: typeof data.result === 'object' ? data.result as Record<string, unknown> : undefined,
-      message: typeof data.message === 'string' ? data.message : undefined,
+      return {
+        success: asBoolean(data.success, false),
+        actionId: asString(data.action_id ?? data.actionId, `action-${Date.now()}`),
+        result: typeof data.result === 'object' ? data.result as Record<string, unknown> : undefined,
+        message: typeof data.message === 'string' ? data.message : undefined,
+      }
+    } catch (err) {
+      console.warn('Agentic action endpoint unavailable:', err)
+      return {
+        success: false,
+        actionId: '',
+        message: err instanceof Error ? err.message : 'Agentic service endpoint unavailable',
+      }
     }
   }
 
