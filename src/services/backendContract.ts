@@ -38,6 +38,8 @@ export const ENDPOINTS = {
   CHAT_CONTEXT_RECENT: '/chat/context/recent',
   /** Server-Sent Events stream */
   CHAT_EVENTS: '/chat/events',
+  /** Request short-lived SSE token */
+  CHAT_EVENTS_TOKEN: '/chat/events/token',
 } as const
 
 // ── Media URL resolution ──────────────────────────────────────────────────────
@@ -168,6 +170,11 @@ export interface ChatEvent {
   content?: string
   timestamp?: string
   [key: string]: unknown
+}
+
+export interface ChatEventsTokenResponse {
+  token: string
+  expiresAt?: string
 }
 
 export interface HealthCheckResponse {
@@ -430,6 +437,37 @@ export class BackendContractAdapter {
       role,
       content: asString(item.content ?? item.text ?? item.message, ''),
       timestamp: asString(item.timestamp, new Date().toISOString()),
+    }
+  }
+
+  /**
+   * Request a short-lived single-use token for SSE authentication.
+   * Maps to: POST /chat/events/token
+   */
+  async requestChatEventsToken(conversationId?: string): Promise<ChatEventsTokenResponse> {
+    try {
+      const body: Record<string, unknown> = {}
+      if (conversationId) {
+        body.conversation_id = conversationId
+      }
+
+      const data = await transportFetchJson<Record<string, unknown>>(
+        ENDPOINTS.CHAT_EVENTS_TOKEN,
+        {
+          method: 'POST',
+          body: JSON.stringify(body),
+        }
+      )
+
+      return {
+        token: asString(data.token, ''),
+        expiresAt: typeof data.expires_at === 'string' || typeof data.expiresAt === 'string'
+          ? (data.expires_at as string) ?? (data.expiresAt as string)
+          : undefined,
+      }
+    } catch (err) {
+      console.warn('[backendContract] requestChatEventsToken failed:', err)
+      throw err
     }
   }
 
