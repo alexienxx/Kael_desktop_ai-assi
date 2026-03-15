@@ -1,3 +1,13 @@
+/**
+ * Control Center Diagnostic Service
+ *
+ * Fetches Control Center diagnostic data from the Kael backend.
+ * Uses backendTransport (shared with the chat service) so that all backend
+ * communication goes through the same timeout / auth / error layer.
+ * Configuration is read from backendConfigStore – the single canonical config
+ * authority – so the Control Center never maintains its own backend state.
+ */
+
 import {
   IdentityData,
   DriftData,
@@ -6,46 +16,52 @@ import {
   AutonomyEvent,
   CognitiveEvent,
 } from '@/lib/types'
+import { transportFetchJson, TransportOptions } from './backendTransport'
 
-export interface ControlCenterData {
-  identity: IdentityData | null
-  drift: DriftData | null
-  memory: MemoryData | null
-  runtime: RuntimeData | null
-  autonomyEvents: AutonomyEvent[]
-  cognitiveEvents: CognitiveEvent[]
+// ── Diagnostic endpoint paths ─────────────────────────────────────────────────
+//
+// Declared here so that all Control Center route assumptions live in one
+// place and can be updated without touching UI components.
+
+const DIAGNOSTIC_ENDPOINTS = {
+  IDENTITY: '/debug/identity',
+  DRIFT: '/self-audit/drift',
+  MEMORY: '/debug/memory',
+  RUNTIME: '/debug/runtime',
+  AUTONOMY: '/debug/autonomy',
+} as const
+
+// ── Shared fetch helper ───────────────────────────────────────────────────────
+
+/**
+ * Fetch a diagnostic endpoint.
+ * baseUrl and apiKey are read from backendConfigStore via transportFetchJson
+ * unless overridden here.
+ */
+function fetchDiagnostic<T>(path: string, opts?: TransportOptions): Promise<T> {
+  return transportFetchJson<T>(path, { method: 'GET', ...opts })
 }
 
-function buildUrl(baseUrl: string, path: string): string {
-  return baseUrl.replace(/\/$/, '') + path
+// ── Public fetch functions ────────────────────────────────────────────────────
+
+export async function fetchIdentity(opts?: TransportOptions): Promise<IdentityData> {
+  return fetchDiagnostic<IdentityData>(DIAGNOSTIC_ENDPOINTS.IDENTITY, opts)
 }
 
-async function fetchJson<T>(url: string, apiKey?: string): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`
-  const res = await fetch(url, { headers })
-  if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status} ${res.statusText}`)
-  return res.json() as Promise<T>
+export async function fetchDrift(opts?: TransportOptions): Promise<DriftData> {
+  return fetchDiagnostic<DriftData>(DIAGNOSTIC_ENDPOINTS.DRIFT, opts)
 }
 
-export async function fetchIdentity(baseUrl: string, apiKey?: string): Promise<IdentityData> {
-  return fetchJson<IdentityData>(buildUrl(baseUrl, '/debug/identity'), apiKey)
+export async function fetchMemory(opts?: TransportOptions): Promise<MemoryData> {
+  return fetchDiagnostic<MemoryData>(DIAGNOSTIC_ENDPOINTS.MEMORY, opts)
 }
 
-export async function fetchDrift(baseUrl: string, apiKey?: string): Promise<DriftData> {
-  return fetchJson<DriftData>(buildUrl(baseUrl, '/self-audit/drift'), apiKey)
+export async function fetchRuntime(opts?: TransportOptions): Promise<RuntimeData> {
+  return fetchDiagnostic<RuntimeData>(DIAGNOSTIC_ENDPOINTS.RUNTIME, opts)
 }
 
-export async function fetchMemory(baseUrl: string, apiKey?: string): Promise<MemoryData> {
-  return fetchJson<MemoryData>(buildUrl(baseUrl, '/debug/memory'), apiKey)
-}
-
-export async function fetchRuntime(baseUrl: string, apiKey?: string): Promise<RuntimeData> {
-  return fetchJson<RuntimeData>(buildUrl(baseUrl, '/debug/runtime'), apiKey)
-}
-
-export async function fetchAutonomy(baseUrl: string, apiKey?: string): Promise<AutonomyEvent[]> {
-  return fetchJson<AutonomyEvent[]>(buildUrl(baseUrl, '/debug/autonomy'), apiKey)
+export async function fetchAutonomy(opts?: TransportOptions): Promise<AutonomyEvent[]> {
+  return fetchDiagnostic<AutonomyEvent[]>(DIAGNOSTIC_ENDPOINTS.AUTONOMY, opts)
 }
 
 // Fallback mock data used when the backend is unreachable or not configured

@@ -3,11 +3,77 @@
  *
  * Normalizes the desktop client's expectations to the actual Kael backend API.
  * Isolates endpoint assumptions and provides a stable interface for the UI.
+ *
+ * All HTTP calls are delegated to backendTransport so that timeout, auth,
+ * and error classification are handled in one place.
+ *
+ * IMPORTANT: Every backend path listed here represents the confirmed (or
+ * best-known) Kael backend contract.  If a route changes, update it here —
+ * nowhere else in the application should hard-code backend paths.
  */
 
-import { Message, MessageContent } from '@/lib/types'
+import { transportFetchJson } from './backendTransport'
 
-// Request/Response types for backend API normalization
+// ── Confirmed Kael backend endpoints ─────────────────────────────────────────
+//
+// These are the only places in the desktop app where backend paths are
+// declared.  UI components must never construct backend URLs themselves.
+
+export const ENDPOINTS = {
+  /** Core chat turn */
+  CHAT: '/chat',
+  /** Regenerate last assistant turn */
+  CHAT_REGENERATE: '/chat/regenerate',
+  /** Message feedback */
+  FEEDBACK: '/feedback',
+  /** Conversation list (may return 404 if not implemented yet) */
+  CONVERSATIONS: '/conversations',
+  /** Liveness / readiness probe */
+  HEALTH: '/health',
+} as const
+
+// ── Media URL resolution ──────────────────────────────────────────────────────
+//
+// Media references returned by the backend may be:
+//   a) A fully-qualified URL  → use directly
+//   b) A backend-relative path  → resolve against baseUrl
+//   c) A bare ID  → construct using the conventional path below
+//
+// The conventional path is documented here in one place so it can be changed
+// without touching UI or service code.
+const MEDIA_PATH_TEMPLATE = (type: 'image' | 'audio', id: string) =>
+  `/media/${type}/${id}`
+
+/**
+ * Resolve a media reference into an absolute URL.
+ *
+ * @param type    'image' or 'audio'
+ * @param ref     A fully-qualified URL, a backend-relative path, or a bare ID
+ * @param baseUrl The backend base URL (from backendConfigStore)
+ */
+export function resolveMediaUrl(
+  type: 'image' | 'audio',
+  ref: string,
+  baseUrl: string
+): string {
+  // Already a full URL
+  if (ref.startsWith('http://') || ref.startsWith('https://')) {
+    return ref
+  }
+
+  const normalizedBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl
+
+  // A relative path (starts with /)
+  if (ref.startsWith('/')) {
+    return `${normalizedBase}${ref}`
+  }
+
+  // Bare ID – construct using conventional template
+  return `${normalizedBase}${MEDIA_PATH_TEMPLATE(type, ref)}`
+}
+
+// ── Request / Response types ──────────────────────────────────────────────────
+
 export interface SendChatMessageRequest {
   conversationId?: string
   message: string
@@ -61,79 +127,41 @@ export interface HealthCheckResponse {
   timestamp: string
 }
 
+// ── Safe coercion helpers ─────────────────────────────────────────────────────
+
+/** Coerce an unknown value to string, returning the fallback if not a string/number. */
+function asString(value: unknown, fallback: string): string {
+  if (typeof value === 'string' && value.length > 0) return value
+  if (typeof value === 'number') return String(value)
+  return fallback
+}
+
+/** Coerce an unknown value to number, returning the fallback if not a number. */
+function asNumber(value: unknown, fallback: number): number {
+  if (typeof value === 'number' && !isNaN(value)) return value
+  return fallback
+}
+
+// ── Adapter ───────────────────────────────────────────────────────────────────
+
 /**
  * Backend Contract Adapter
  *
- * Provides a normalized interface to the Kael backend API.
- * Handles endpoint mapping, request/response transformation, and error normalization.
+ * Translates desktop-side request types into HTTP calls via backendTransport,
+ * and normalises responses into stable desktop-side types.
+ *
+ * Configuration (baseUrl, apiKey, timeout) is read from backendConfigStore
+ * inside backendTransport – the adapter itself is stateless.
  */
 export class BackendContractAdapter {
-  private baseUrl: string
-  private apiKey?: string
-  private timeout: number
-
-  constructor(baseUrl: string, apiKey?: string, timeout: number = 30000) {
-    this.baseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl
-    this.apiKey = apiKey
-    this.timeout = timeout
-  }
-
   /**
-   * Update configuration
-   */
-  configure(baseUrl: string, apiKey?: string, timeout?: number) {
-    this.baseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl
-    this.apiKey = apiKey
-    if (timeout !== undefined) {
-      this.timeout = timeout
-    }
-  }
-
-  /**
-   * Perform a fetch request with timeout and error handling
-   */
-  private async fetchWithTimeout(
-    endpoint: string,
-    options: RequestInit = {}
-  ): Promise<Response> {
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout)
-
-    const headers: HeadersInit = {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    }
-
-    if (this.apiKey) {
-      headers['Authorization'] = `Bearer ${this.apiKey}`
-    }
-
-    try {
-      const response = await fetch(`${this.baseUrl}${endpoint}`, {
-        ...options,
-        headers,
-        signal: controller.signal,
-      })
-
-      clearTimeout(timeoutId)
-      return response
-    } catch (error) {
-      clearTimeout(timeoutId)
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new Error(`Request timeout after ${this.timeout}ms`)
-      }
-      throw error
-    }
-  }
-
-  /**
-   * Send a chat message
+   * Send a chat message.
    * Maps to: POST /chat
    */
   async sendChatMessage(
     request: SendChatMessageRequest
   ): Promise<SendChatMessageResponse> {
-    const response = await this.fetchWithTimeout('/chat', {
+    const data = await transportFetchJson<Record<string, unknown>>(ENDPOINTS.CHAT, {
       method: 'POST',
       body: JSON.stringify({
         conversation_id: request.conversationId,
@@ -142,29 +170,23 @@ export class BackendContractAdapter {
       }),
     })
 
-    if (!response.ok) {
-      throw new Error(`Failed to send message: ${response.status} ${response.statusText}`)
-    }
-
-    const data = await response.json()
-
     return {
-      conversationId: data.conversation_id || data.conversationId,
-      messageId: data.message_id || data.messageId || `msg-${Date.now()}`,
-      content: data.content || data.message || '',
+      conversationId: asString(data.conversation_id ?? data.conversationId, ''),
+      messageId: asString(data.message_id ?? data.messageId, `msg-${Date.now()}`),
+      content: asString(data.content ?? data.message, ''),
       role: 'assistant',
-      timestamp: data.timestamp || new Date().toISOString(),
+      timestamp: asString(data.timestamp, new Date().toISOString()),
     }
   }
 
   /**
-   * Regenerate the last assistant turn
+   * Regenerate the last assistant turn.
    * Maps to: POST /chat/regenerate
    */
   async regenerateTurn(
     request: RegenerateTurnRequest
   ): Promise<RegenerateTurnResponse> {
-    const response = await this.fetchWithTimeout('/chat/regenerate', {
+    const data = await transportFetchJson<Record<string, unknown>>(ENDPOINTS.CHAT_REGENERATE, {
       method: 'POST',
       body: JSON.stringify({
         conversation_id: request.conversationId,
@@ -172,29 +194,23 @@ export class BackendContractAdapter {
       }),
     })
 
-    if (!response.ok) {
-      throw new Error(`Failed to regenerate: ${response.status} ${response.statusText}`)
-    }
-
-    const data = await response.json()
-
     return {
-      conversationId: data.conversation_id || data.conversationId,
-      messageId: data.message_id || data.messageId || request.messageId,
-      content: data.content || data.message || '',
+      conversationId: asString(data.conversation_id ?? data.conversationId, ''),
+      messageId: asString(data.message_id ?? data.messageId, request.messageId),
+      content: asString(data.content ?? data.message, ''),
       role: 'assistant',
-      timestamp: data.timestamp || new Date().toISOString(),
+      timestamp: asString(data.timestamp, new Date().toISOString()),
     }
   }
 
   /**
-   * Submit feedback on a message
+   * Submit feedback on a message.
    * Maps to: POST /feedback
    */
   async submitFeedback(
     request: SubmitFeedbackRequest
   ): Promise<SubmitFeedbackResponse> {
-    const response = await this.fetchWithTimeout('/feedback', {
+    const data = await transportFetchJson<Record<string, unknown>>(ENDPOINTS.FEEDBACK, {
       method: 'POST',
       body: JSON.stringify({
         message_id: request.messageId,
@@ -204,78 +220,64 @@ export class BackendContractAdapter {
       }),
     })
 
-    if (!response.ok) {
-      throw new Error(`Failed to submit feedback: ${response.status} ${response.statusText}`)
-    }
-
-    const data = await response.json()
-
     return {
       success: data.success !== false,
-      feedbackId: data.feedback_id || data.feedbackId || `feedback-${Date.now()}`,
+      feedbackId: asString(data.feedback_id ?? data.feedbackId, `feedback-${Date.now()}`),
     }
   }
 
   /**
-   * Get conversation list
-   * Maps to: GET /conversations (if available)
+   * Get conversation list.
+   * Maps to: GET /conversations (may return 404 if not implemented)
    */
   async getConversations(): Promise<ConversationResponse[]> {
     try {
-      const response = await this.fetchWithTimeout('/conversations', {
+      const data = await transportFetchJson<unknown>(ENDPOINTS.CONVERSATIONS, {
         method: 'GET',
       })
 
-      if (!response.ok) {
-        // Return empty array if endpoint doesn't exist
-        if (response.status === 404) {
-          return []
-        }
-        throw new Error(`Failed to get conversations: ${response.status} ${response.statusText}`)
-      }
+      const conversations = Array.isArray(data)
+        ? data
+        : (data as Record<string, unknown>).conversations ?? []
 
-      const data = await response.json()
-      const conversations = Array.isArray(data) ? data : data.conversations || []
-
-      return conversations.map((conv: any) => ({
-        id: conv.id || conv.conversation_id,
-        title: conv.title,
-        createdAt: conv.created_at || conv.createdAt || new Date().toISOString(),
-        lastMessageAt: conv.last_message_at || conv.lastMessageAt,
-        messageCount: conv.message_count || conv.messageCount || 0,
+      return (conversations as Record<string, unknown>[]).map((conv) => ({
+        id: asString(conv.id ?? conv.conversation_id, `conv-${Date.now()}`),
+        title: typeof conv.title === 'string' ? conv.title : undefined,
+        createdAt: asString(conv.created_at ?? conv.createdAt, new Date().toISOString()),
+        lastMessageAt: typeof conv.last_message_at === 'string'
+          ? conv.last_message_at
+          : typeof conv.lastMessageAt === 'string'
+          ? conv.lastMessageAt
+          : undefined,
+        messageCount: asNumber(conv.message_count ?? conv.messageCount, 0),
       }))
-    } catch (error) {
-      console.warn('Failed to fetch conversations:', error)
+    } catch (err) {
+      // Gracefully degrade when the endpoint is not yet available
+      console.warn('Failed to fetch conversations:', err)
       return []
     }
   }
 
   /**
-   * Create a new conversation
-   * Maps to: POST /conversations (if available)
+   * Create a new conversation.
+   * Maps to: POST /conversations (may return 404 if not implemented)
    */
   async createConversation(title?: string): Promise<ConversationResponse> {
     try {
-      const response = await this.fetchWithTimeout('/conversations', {
+      const data = await transportFetchJson<Record<string, unknown>>(ENDPOINTS.CONVERSATIONS, {
         method: 'POST',
         body: JSON.stringify({ title }),
       })
 
-      if (!response.ok) {
-        throw new Error(`Failed to create conversation: ${response.status} ${response.statusText}`)
-      }
-
-      const data = await response.json()
-
       return {
-        id: data.id || data.conversation_id || `conv-${Date.now()}`,
-        title: data.title,
-        createdAt: data.created_at || data.createdAt || new Date().toISOString(),
+        id: asString(data.id ?? data.conversation_id, `conv-${Date.now()}`),
+        title: typeof data.title === 'string' ? data.title : undefined,
+        createdAt: asString(data.created_at ?? data.createdAt, new Date().toISOString()),
         messageCount: 0,
       }
-    } catch (error) {
+    } catch (err) {
       // If endpoint doesn't exist, create locally
-      console.warn('Conversation creation endpoint not available:', error)
+      console.warn('Conversation creation endpoint not available:', err)
       return {
         id: `conv-${Date.now()}`,
         title,
@@ -286,48 +288,32 @@ export class BackendContractAdapter {
   }
 
   /**
-   * Health check
-   * Maps to: GET /health or GET /
+   * Health check.
+   * Maps to: GET /health (falls back to GET /)
    */
   async healthCheck(): Promise<HealthCheckResponse> {
     try {
-      const response = await this.fetchWithTimeout('/health', {
+      const data = await transportFetchJson<Record<string, unknown>>(ENDPOINTS.HEALTH, {
         method: 'GET',
       })
 
-      if (!response.ok) {
-        // Try root endpoint
-        const rootResponse = await this.fetchWithTimeout('/', {
-          method: 'GET',
-        })
-
-        if (!rootResponse.ok) {
-          throw new Error(`Health check failed: ${rootResponse.status}`)
-        }
-
-        return {
-          status: 'healthy',
-          timestamp: new Date().toISOString(),
-        }
-      }
-
-      const data = await response.json()
+      const VALID_STATUSES = ['healthy', 'degraded', 'unhealthy'] as const
+      const rawStatus = typeof data.status === 'string' ? data.status : ''
+      const status: 'healthy' | 'degraded' | 'unhealthy' =
+        (VALID_STATUSES as readonly string[]).includes(rawStatus)
+          ? (rawStatus as 'healthy' | 'degraded' | 'unhealthy')
+          : 'healthy'
 
       return {
-        status: data.status || 'healthy',
-        version: data.version,
-        timestamp: data.timestamp || new Date().toISOString(),
+        status,
+        version: typeof data.version === 'string' ? data.version : undefined,
+        timestamp: asString(data.timestamp, new Date().toISOString()),
       }
-    } catch (error) {
-      throw new Error(`Health check failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+    } catch (err) {
+      throw new Error(
+        `Health check failed: ${err instanceof Error ? err.message : 'Unknown error'}`
+      )
     }
   }
-
-  /**
-   * Get media URL (image/audio)
-   * Maps to: GET /media/{type}/:id
-   */
-  getMediaUrl(type: 'image' | 'audio', id: string): string {
-    return `${this.baseUrl}/media/${type}/${id}`
-  }
 }
+

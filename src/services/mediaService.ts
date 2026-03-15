@@ -7,9 +7,13 @@
  * - CORS error handling
  * - Download verification
  * - Proper error reporting
+ *
+ * Media URL resolution is centralized via resolveMediaUrl from backendContract
+ * so that the URL construction logic lives in one place.
  */
 
-import { backendService } from './backendService'
+import { resolveMediaUrl } from './backendContract'
+import { backendConfigStore } from './backendConfigStore'
 
 export interface DownloadResult {
   success: boolean
@@ -30,14 +34,15 @@ export interface DownloadOptions {
  */
 export class MediaService {
   /**
-   * Download an image from the backend
+   * Download an image from the backend.
+   * @param ref  A fully-qualified URL, backend-relative path, or bare image ID
    */
   async downloadImage(
-    imageId: string,
+    ref: string,
     options: DownloadOptions = {}
   ): Promise<DownloadResult> {
-    const url = backendService.getMediaUrl('image', imageId)
-    if (!url) {
+    const baseUrl = backendConfigStore.getBaseUrl()
+    if (!baseUrl) {
       return {
         success: false,
         filename: '',
@@ -45,19 +50,21 @@ export class MediaService {
       }
     }
 
+    const url = resolveMediaUrl('image', ref, baseUrl)
     const filename = this.generateFilename('image', options)
     return this.downloadMedia(url, filename, 'image')
   }
 
   /**
-   * Download an audio file from the backend
+   * Download an audio file from the backend.
+   * @param ref  A fully-qualified URL, backend-relative path, or bare audio ID
    */
   async downloadAudio(
-    audioId: string,
+    ref: string,
     options: DownloadOptions = {}
   ): Promise<DownloadResult> {
-    const url = backendService.getMediaUrl('audio', audioId)
-    if (!url) {
+    const baseUrl = backendConfigStore.getBaseUrl()
+    if (!baseUrl) {
       return {
         success: false,
         filename: '',
@@ -65,6 +72,7 @@ export class MediaService {
       }
     }
 
+    const url = resolveMediaUrl('audio', ref, baseUrl)
     const filename = this.generateFilename('audio', options)
     return this.downloadMedia(url, filename, 'audio')
   }

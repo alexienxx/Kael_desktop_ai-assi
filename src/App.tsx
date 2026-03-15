@@ -13,6 +13,7 @@ import { toast } from 'sonner'
 import { backendService } from '@/services/backendService'
 import { mediaService } from '@/services/mediaService'
 import { conversationManager } from '@/services/conversationManager'
+import { backendConfigStore } from '@/services/backendConfigStore'
 
 function App() {
   const [conversations, setConversations] = useKV<Conversation[]>('kael-conversations', [])
@@ -33,10 +34,15 @@ function App() {
     applyThemeSettings(themeSettings || defaultThemeSettings)
   }, [themeSettings])
 
-  // Configure backend service when config changes
+  // Configure backend service when config changes.
+  // backendService.configure() calls backendConfigStore.set() internally,
+  // propagating the config to all other services (e.g. controlCenterService).
   useEffect(() => {
     if (backendConfig) {
       backendService.configure(backendConfig)
+    } else {
+      // Ensure the store is cleared when no config is present
+      backendConfigStore.set(null)
     }
   }, [backendConfig])
 
@@ -156,10 +162,8 @@ function App() {
     if (!message) return
 
     try {
-      // Extract media ID from URL if backend is configured
-      // For now, use the full URL
-      const url = type === 'image' ? message.content.imageUrl : message.content.audioUrl
-      if (!url) return
+      const ref = type === 'image' ? message.content.imageUrl : message.content.audioUrl
+      if (!ref) return
 
       // Get conversation title for filename
       const conversation = (conversations || []).find(c => c.id === message.conversationId)
@@ -167,21 +171,19 @@ function App() {
 
       let result
       if (backendService.isConnected()) {
-        // Extract ID from URL (assuming format: /media/{type}/{id})
-        const urlParts = url.split('/')
-        const mediaId = urlParts[urlParts.length - 1]
-
+        // Pass the raw ref (URL, path, or ID) – mediaService resolves it via
+        // resolveMediaUrl in backendContract so we never need to parse URLs here.
         if (type === 'image') {
-          result = await mediaService.downloadImage(mediaId, { conversationTitle })
+          result = await mediaService.downloadImage(ref, { conversationTitle })
         } else {
-          result = await mediaService.downloadAudio(mediaId, { conversationTitle })
+          result = await mediaService.downloadAudio(ref, { conversationTitle })
         }
 
         if (result.success) {
           const media: DownloadedMedia = {
             id: `media-${Date.now()}`,
             type,
-            url: result.url || url,
+            url: result.url || ref,
             filename: result.filename,
             timestamp: new Date(),
             conversationId: message.conversationId,
@@ -198,7 +200,7 @@ function App() {
         const media: DownloadedMedia = {
           id: `media-${Date.now()}`,
           type,
-          url,
+          url: ref,
           filename: type === 'image' ? `image-${Date.now()}.png` : `audio-${Date.now()}.mp3`,
           timestamp: new Date(),
           conversationId: message.conversationId,
@@ -270,7 +272,7 @@ function App() {
         onOpenChange={setSettingsOpen}
         themeSettings={themeSettings || defaultThemeSettings}
         onThemeSettingsChange={setThemeSettings}
-        backendConfig={backendConfig}
+        backendConfig={backendConfig ?? null}
         onBackendConfigChange={handleBackendConfigChange}
         connectionStatus={connectionStatus}
         onTestConnection={handleTestConnection}
