@@ -30,6 +30,11 @@ export const ENDPOINTS = {
   CONVERSATIONS: '/conversations',
   /** Liveness / readiness probe */
   HEALTH: '/health',
+  /** Agentic repo-awareness endpoints */
+  AGENTIC_REPO_STATUS: '/agentic/repo/status',
+  AGENTIC_REPO_ANALYZE: '/agentic/repo/analyze',
+  AGENTIC_REPO_SELF_AUDIT: '/agentic/repo/self_audit',
+  AGENTIC_REPO_DRAFT_ISSUE: '/agentic/repo/draft_issue',
 } as const
 
 // ── Media URL resolution ──────────────────────────────────────────────────────
