@@ -27,6 +27,7 @@ export class ChatEventsService {
   private active = false
   private adapter: BackendContractAdapter = new BackendContractAdapter()
   private conversationId?: string
+  private shouldReconnect = true
 
   /**
    * Subscribe to backend SSE using token-based authentication.
@@ -37,6 +38,7 @@ export class ChatEventsService {
   async subscribe(conversationId?: string): Promise<void> {
     this.unsubscribe()
     this.conversationId = conversationId
+    this.shouldReconnect = true
 
     const baseUrl = backendConfigStore.getBaseUrl()
     if (!baseUrl) {
@@ -91,17 +93,21 @@ export class ChatEventsService {
         // tokens are single-use, we need to obtain a fresh token.
         // Close the current connection and resubscribe with a new token.
         console.warn('[chatEventsService] SSE error, will reconnect with fresh token:', err)
+
+        // Store conversationId before unsubscribe clears it
+        const reconnectConversationId = this.conversationId
         this.unsubscribe()
 
-        // Attempt to reconnect after a short delay
-        setTimeout(() => {
-          if (!this.active) {
-            // Only reconnect if we haven't been explicitly unsubscribed
-            this.subscribe(this.conversationId).catch((reconnectErr) => {
-              console.error('[chatEventsService] Failed to reconnect:', reconnectErr)
-            })
-          }
-        }, 3000) // 3 second delay before reconnect attempt
+        // Attempt to reconnect after a short delay if reconnection is desired
+        if (this.shouldReconnect) {
+          setTimeout(() => {
+            if (this.shouldReconnect) {
+              this.subscribe(reconnectConversationId).catch((reconnectErr) => {
+                console.error('[chatEventsService] Failed to reconnect:', reconnectErr)
+              })
+            }
+          }, 3000) // 3 second delay before reconnect attempt
+        }
       }
     } catch (err) {
       console.error('[chatEventsService] Failed to create EventSource:', err)
@@ -113,6 +119,7 @@ export class ChatEventsService {
    * Stop the SSE subscription and clean up.
    */
   unsubscribe(): void {
+    this.shouldReconnect = false
     if (this.eventSource) {
       this.eventSource.close()
       this.eventSource = null
