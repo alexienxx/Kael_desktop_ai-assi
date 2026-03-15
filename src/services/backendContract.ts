@@ -30,6 +30,14 @@ export const ENDPOINTS = {
   CONVERSATIONS: '/conversations',
   /** Liveness / readiness probe */
   HEALTH: '/health',
+  /** Full conversation history */
+  CHAT_HISTORY_MESSAGES: '/chat/history/messages',
+  /** Pending (undelivered) messages since last ack */
+  CHAT_HISTORY_PENDING: '/chat/history/pending',
+  /** Recent context snapshot */
+  CHAT_CONTEXT_RECENT: '/chat/context/recent',
+  /** Server-Sent Events stream */
+  CHAT_EVENTS: '/chat/events',
 } as const
 
 // ── Media URL resolution ──────────────────────────────────────────────────────
@@ -119,6 +127,47 @@ export interface ConversationResponse {
   createdAt: string
   lastMessageAt?: string
   messageCount: number
+}
+
+// ── History / context / SSE types ─────────────────────────────────────────────
+
+export interface ChatHistoryMessage {
+  messageId: string
+  conversationId: string
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: string
+}
+
+export interface ChatContextRecent {
+  conversationId: string
+  summary?: string
+  recentMessages: ChatHistoryMessage[]
+}
+
+export interface ChatPendingMessage {
+  messageId: string
+  conversationId: string
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: string
+}
+
+export type ChatEventType =
+  | 'message'
+  | 'message_start'
+  | 'message_end'
+  | 'status'
+  | 'error'
+  | 'ping'
+
+export interface ChatEvent {
+  type: ChatEventType
+  messageId?: string
+  conversationId?: string
+  content?: string
+  timestamp?: string
+  [key: string]: unknown
 }
 
 export interface HealthCheckResponse {
@@ -284,6 +333,103 @@ export class BackendContractAdapter {
         createdAt: new Date().toISOString(),
         messageCount: 0,
       }
+    }
+  }
+
+  /**
+   * Fetch full conversation history messages.
+   * Maps to: GET /chat/history/messages
+   */
+  async getChatHistoryMessages(conversationId?: string): Promise<ChatHistoryMessage[]> {
+    try {
+      const path = conversationId
+        ? `${ENDPOINTS.CHAT_HISTORY_MESSAGES}?conversation_id=${encodeURIComponent(conversationId)}`
+        : ENDPOINTS.CHAT_HISTORY_MESSAGES
+
+      const data = await transportFetchJson<unknown>(path, { method: 'GET' })
+
+      const items: Record<string, unknown>[] = Array.isArray(data)
+        ? (data as Record<string, unknown>[])
+        : Array.isArray((data as Record<string, unknown>).messages)
+        ? ((data as Record<string, unknown>).messages as Record<string, unknown>[])
+        : []
+
+      return items.map((item) => this.coerceChatHistoryMessage(item))
+    } catch (err) {
+      console.warn('[backendContract] getChatHistoryMessages failed:', err)
+      return []
+    }
+  }
+
+  /**
+   * Fetch pending (undelivered/missed) messages.
+   * Maps to: GET /chat/history/pending
+   */
+  async getChatHistoryPending(conversationId?: string): Promise<ChatPendingMessage[]> {
+    try {
+      const path = conversationId
+        ? `${ENDPOINTS.CHAT_HISTORY_PENDING}?conversation_id=${encodeURIComponent(conversationId)}`
+        : ENDPOINTS.CHAT_HISTORY_PENDING
+
+      const data = await transportFetchJson<unknown>(path, { method: 'GET' })
+
+      const items: Record<string, unknown>[] = Array.isArray(data)
+        ? (data as Record<string, unknown>[])
+        : Array.isArray((data as Record<string, unknown>).messages)
+        ? ((data as Record<string, unknown>).messages as Record<string, unknown>[])
+        : []
+
+      return items.map((item) => this.coerceChatHistoryMessage(item))
+    } catch (err) {
+      console.warn('[backendContract] getChatHistoryPending failed:', err)
+      return []
+    }
+  }
+
+  /**
+   * Fetch recent context snapshot.
+   * Maps to: GET /chat/context/recent
+   */
+  async getChatContextRecent(conversationId?: string): Promise<ChatContextRecent | null> {
+    try {
+      const path = conversationId
+        ? `${ENDPOINTS.CHAT_CONTEXT_RECENT}?conversation_id=${encodeURIComponent(conversationId)}`
+        : ENDPOINTS.CHAT_CONTEXT_RECENT
+
+      const data = await transportFetchJson<Record<string, unknown>>(path, { method: 'GET' })
+
+      const convId = asString(data.conversation_id ?? data.conversationId, conversationId ?? '')
+      const recentRaw = Array.isArray(data.recent_messages)
+        ? (data.recent_messages as Record<string, unknown>[])
+        : Array.isArray(data.recentMessages)
+        ? (data.recentMessages as Record<string, unknown>[])
+        : []
+
+      return {
+        conversationId: convId,
+        summary: typeof data.summary === 'string' ? data.summary : undefined,
+        recentMessages: recentRaw.map((item) => this.coerceChatHistoryMessage(item)),
+      }
+    } catch (err) {
+      console.warn('[backendContract] getChatContextRecent failed:', err)
+      return null
+    }
+  }
+
+  /**
+   * Coerce an unknown payload item into a ChatHistoryMessage.
+   */
+  private coerceChatHistoryMessage(item: Record<string, unknown>): ChatHistoryMessage {
+    const rawRole = item.role ?? item.sender
+    const role: 'user' | 'assistant' =
+      rawRole === 'user' || rawRole === 'assistant' ? rawRole : 'assistant'
+
+    return {
+      messageId: asString(item.message_id ?? item.messageId ?? item.id, `msg-${Date.now()}`),
+      conversationId: asString(item.conversation_id ?? item.conversationId, ''),
+      role,
+      content: asString(item.content ?? item.text ?? item.message, ''),
+      timestamp: asString(item.timestamp, new Date().toISOString()),
     }
   }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useKV } from '@github/spark/hooks'
 import { Sidebar } from '@/components/Sidebar'
 import { ChatWindow } from '@/components/ChatWindow'
@@ -14,6 +14,7 @@ import { backendService } from '@/services/backendService'
 import { mediaService } from '@/services/mediaService'
 import { conversationManager } from '@/services/conversationManager'
 import { backendConfigStore } from '@/services/backendConfigStore'
+import { chatSyncService } from '@/services/chatSyncService'
 
 function App() {
   const [conversations, setConversations] = useKV<Conversation[]>('kael-conversations', [])
@@ -29,6 +30,9 @@ function App() {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected')
   const [sending, setSending] = useState(false)
 
+  // Track the previous connection status so we can detect reconnects
+  const prevConnectionStatus = useRef<ConnectionStatus>('disconnected')
+
   // Apply theme settings on mount and change
   useEffect(() => {
     applyThemeSettings(themeSettings || defaultThemeSettings)
@@ -43,25 +47,114 @@ function App() {
     } else {
       // Ensure the store is cleared when no config is present
       backendConfigStore.set(null)
+      chatSyncService.disconnect()
     }
   }, [backendConfig])
 
-  // Subscribe to connection status changes
+  // Subscribe to connection status changes; trigger chat sync on connect/reconnect
   useEffect(() => {
     const unsubscribe = backendService.onConnectionStatusChange((status) => {
       setConnectionStatus(status)
+
+      const wasConnected = prevConnectionStatus.current === 'connected'
+      const isNowConnected = status === 'connected'
+      prevConnectionStatus.current = status
+
+      if (isNowConnected) {
+        const convId = activeConversationId ?? undefined
+        if (wasConnected) {
+          // Reconnect: only reconcile pending messages (avoid full re-render flash)
+          chatSyncService.reconcilePending(convId).catch((err) => {
+            console.warn('[App] Pending reconciliation failed:', err)
+          })
+        } else {
+          // Fresh connect: restore full history
+          chatSyncService.connect(convId).catch((err) => {
+            console.warn('[App] Chat sync connect failed:', err)
+          })
+        }
+      }
     })
 
     // Get initial status
-    setConnectionStatus(backendService.getConnectionStatus())
+    const initial = backendService.getConnectionStatus()
+    setConnectionStatus(initial)
+    prevConnectionStatus.current = initial
 
     return unsubscribe
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Register chat sync observers (history restore + individual messages from SSE/pending)
+  useEffect(() => {
+    const unsubHistory = chatSyncService.onHistoryRestore((backendMessages) => {
+      // Replace KV messages for conversations we now have backend truth for
+      setMessages((current) => {
+        const currentMsgs = current || []
+        // Collect conversation IDs covered by backend history
+        const coveredConvIds = new Set(backendMessages.map((m) => m.conversationId))
+        // Keep local messages for conversations not covered by backend history
+        const notCovered = currentMsgs.filter((m) => !coveredConvIds.has(m.conversationId))
+        return [...notCovered, ...backendMessages]
+      })
+
+      // Seed known IDs so SSE/pending don't re-emit these messages
+      chatSyncService.seedKnownIds(backendMessages)
+    })
+
+    const unsubMessage = chatSyncService.onMessageArrived((msg) => {
+      setMessages((current) => {
+        const currentMsgs = current || []
+        // Guard against duplicates (belt-and-suspenders beyond service-level dedup)
+        if (currentMsgs.some((m) => m.id === msg.id)) return currentMsgs
+        return [...currentMsgs, msg]
+      })
+
+      // Update conversation metadata when a backend-driven message arrives
+      if (msg.conversationId) {
+        setConversations((current) =>
+          (current || []).map((conv) =>
+            conv.id === msg.conversationId
+              ? {
+                  ...conv,
+                  lastMessage: msg.content.text?.substring(0, 50),
+                  timestamp: msg.timestamp,
+                  messageCount: conv.messageCount + 1,
+                }
+              : conv
+          )
+        )
+      }
+    })
+
+    return () => {
+      unsubHistory()
+      unsubMessage()
+    }
+  // setMessages and setConversations are stable KV setters
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Seed known IDs from existing local messages so sync service avoids
+  // re-emitting messages that are already in local KV state.
+  useEffect(() => {
+    if (messages && messages.length > 0) {
+      chatSyncService.seedKnownIds(messages)
+    }
+  // Only run once on mount (or when messages first loads from KV)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Sync active conversation with conversation manager
   useEffect(() => {
     if (activeConversationId) {
       conversationManager.setActiveConversationId(activeConversationId)
+      // When switching conversations while connected, restore history for the new one
+      if (backendService.isConnected()) {
+        chatSyncService.connect(activeConversationId).catch((err) => {
+          console.warn('[App] Chat sync on conversation switch failed:', err)
+        })
+      }
     }
   }, [activeConversationId])
   const activeConversation = (conversations || []).find(c => c.id === activeConversationId)
