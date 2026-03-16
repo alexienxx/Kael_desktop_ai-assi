@@ -182,9 +182,17 @@ export class ChatEventsService {
         explicitType ??
         (typeof parsed.type === 'string' ? (parsed.type as ChatEvent['type']) : 'message')
 
+      // Normalize role, defaulting to 'assistant' for backward compatibility
+      const rawRole = parsed.role ?? parsed.sender
+      const role: 'user' | 'assistant' | 'external_agent' =
+        rawRole === 'user' || rawRole === 'assistant' || rawRole === 'external_agent'
+          ? rawRole
+          : 'assistant'
+
       const event: ChatEvent = {
         ...parsed,
         type,
+        role,
         messageId:
           typeof parsed.message_id === 'string'
             ? parsed.message_id
@@ -207,6 +215,18 @@ export class ChatEventsService {
             : undefined,
         timestamp:
           typeof parsed.timestamp === 'string' ? parsed.timestamp : new Date().toISOString(),
+        externalAgentId:
+          typeof parsed.external_agent_id === 'string'
+            ? parsed.external_agent_id
+            : typeof parsed.externalAgentId === 'string'
+            ? parsed.externalAgentId
+            : undefined,
+        externalAgentName:
+          typeof parsed.external_agent_name === 'string'
+            ? parsed.external_agent_name
+            : typeof parsed.externalAgentName === 'string'
+            ? parsed.externalAgentName
+            : undefined,
       }
 
       // Skip pings silently
