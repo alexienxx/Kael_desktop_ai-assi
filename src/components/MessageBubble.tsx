@@ -12,6 +12,7 @@ interface MessageBubbleProps {
 
 export function MessageBubble({ message, bubbleClasses, showTimestamp, onMediaDownload }: MessageBubbleProps) {
   const isUser = message.role === 'user'
+  const isExternalAgent = message.role === 'external_agent'
 
   const renderContent = () => {
     switch (message.content.type) {
@@ -49,9 +50,18 @@ export function MessageBubble({ message, bubbleClasses, showTimestamp, onMediaDo
     }
   }
 
+  const agentLabel = isExternalAgent
+    ? (message.externalAgentName ?? message.externalAgentId ?? 'External Agent')
+    : null
+
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
       <div className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} max-w-2xl`}>
+        {isExternalAgent && agentLabel && (
+          <span className="text-xs font-medium text-purple-500 mb-1 px-2">
+            {agentLabel}
+          </span>
+        )}
         {renderContent()}
         
         {showTimestamp && (

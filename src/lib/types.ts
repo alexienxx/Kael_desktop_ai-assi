@@ -1,4 +1,4 @@
-export type MessageRole = 'user' | 'assistant'
+export type MessageRole = 'user' | 'assistant' | 'external_agent'
 
 export type MessageContentType = 'text' | 'image' | 'audio'
 
@@ -17,6 +17,10 @@ export interface Message {
   content: MessageContent
   timestamp: Date
   conversationId: string
+  /** Present only when role === 'external_agent' */
+  externalAgentId?: string
+  /** Present only when role === 'external_agent' */
+  externalAgentName?: string
 }
 
 export interface Conversation {

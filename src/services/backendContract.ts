@@ -116,9 +116,13 @@ export interface SubmitFeedbackResponse {
 export interface ChatHistoryMessage {
   messageId: string
   conversationId: string
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'external_agent'
   content: string
   timestamp: string
+  /** Present only when role === 'external_agent' */
+  externalAgentId?: string
+  /** Present only when role === 'external_agent' */
+  externalAgentName?: string
 }
 
 export interface ChatContextRecent {
@@ -130,9 +134,13 @@ export interface ChatContextRecent {
 export interface ChatPendingMessage {
   messageId: string
   conversationId: string
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'external_agent'
   content: string
   timestamp: string
+  /** Present only when role === 'external_agent' */
+  externalAgentId?: string
+  /** Present only when role === 'external_agent' */
+  externalAgentName?: string
 }
 
 export type ChatEventType =
@@ -147,8 +155,11 @@ export interface ChatEvent {
   type: ChatEventType
   messageId?: string
   conversationId?: string
+  role?: 'user' | 'assistant' | 'external_agent'
   content?: string
   timestamp?: string
+  externalAgentId?: string
+  externalAgentName?: string
   [key: string]: unknown
 }
 
@@ -317,16 +328,31 @@ export class BackendContractAdapter {
    */
   private coerceChatHistoryMessage(item: Record<string, unknown>): ChatHistoryMessage {
     const rawRole = item.role ?? item.sender
-    const role: 'user' | 'assistant' =
-      rawRole === 'user' || rawRole === 'assistant' ? rawRole : 'assistant'
+    const role: 'user' | 'assistant' | 'external_agent' =
+      rawRole === 'user' || rawRole === 'assistant' || rawRole === 'external_agent'
+        ? rawRole
+        : 'assistant'
 
-    return {
+    const base: ChatHistoryMessage = {
       messageId: asString(item.message_id ?? item.messageId ?? item.id, `msg-${Date.now()}`),
       conversationId: asString(item.conversation_id ?? item.conversationId, ''),
       role,
       content: asString(item.content ?? item.text ?? item.message, ''),
       timestamp: asString(item.timestamp, new Date().toISOString()),
     }
+
+    if (role === 'external_agent') {
+      const agentId = item.external_agent_id ?? item.externalAgentId
+      const agentName = item.external_agent_name ?? item.externalAgentName
+      if (typeof agentId === 'string' && agentId.length > 0) {
+        base.externalAgentId = agentId
+      }
+      if (typeof agentName === 'string' && agentName.length > 0) {
+        base.externalAgentName = agentName
+      }
+    }
+
+    return base
   }
 
   /**

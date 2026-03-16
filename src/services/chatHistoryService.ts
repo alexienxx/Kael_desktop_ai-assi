@@ -22,6 +22,10 @@ function toMessage(item: ChatHistoryMessage): Message {
     content: { type: 'text', text: item.content },
     timestamp: new Date(item.timestamp),
     conversationId: item.conversationId,
+    ...(item.role === 'external_agent' && {
+      externalAgentId: item.externalAgentId,
+      externalAgentName: item.externalAgentName,
+    }),
   }
 }
 

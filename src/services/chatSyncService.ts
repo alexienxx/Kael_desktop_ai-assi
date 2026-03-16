@@ -202,12 +202,18 @@ export class ChatSyncService {
 
       if (!event.content || !event.messageId) return
 
+      const role = event.role ?? 'assistant'
+
       const msg: Message = {
         id: event.messageId,
-        role: 'assistant',
+        role,
         content: { type: 'text', text: event.content },
         timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
         conversationId: event.conversationId ?? '',
+        ...(role === 'external_agent' && {
+          externalAgentId: event.externalAgentId,
+          externalAgentName: event.externalAgentName,
+        }),
       }
 
       this._emitMessageIfNew(msg)
