@@ -194,39 +194,6 @@ export class BackendService {
   }
 
   /**
-   * Regenerate the last assistant response
-   */
-  async regenerate(messageId: string): Promise<{
-    conversationId: string
-    messageId: string
-    content: string
-    timestamp: string
-  }> {
-    if (!this.adapter) {
-      throw new Error('Backend not configured')
-    }
-
-    if (!this.isConnected()) {
-      throw new Error('Backend not connected')
-    }
-
-    const conversationId = conversationManager.getActiveConversationId()
-    if (!conversationId) {
-      throw new Error('No active conversation')
-    }
-
-    try {
-      return await this.adapter.regenerateTurn({
-        conversationId,
-        messageId,
-      })
-    } catch (error) {
-      this.handleConnectionError(error)
-      throw error
-    }
-  }
-
-  /**
    * Submit feedback on a message
    */
   async submitFeedback(
@@ -253,23 +220,6 @@ export class BackendService {
     } catch (error) {
       console.error('Failed to submit feedback:', error)
       // Don't trigger reconnect for feedback errors
-    }
-  }
-
-  /**
-   * Create a new conversation
-   */
-  async createConversation(title?: string): Promise<string> {
-    if (!this.adapter) {
-      throw new Error('Backend not configured')
-    }
-
-    try {
-      const response = await this.adapter.createConversation(title)
-      return conversationManager.createConversation(response.id)
-    } catch (error) {
-      console.warn('Failed to create conversation on backend, using local:', error)
-      return conversationManager.createConversation()
     }
   }
 

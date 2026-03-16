@@ -22,16 +22,8 @@ import { transportFetchJson } from './backendTransport'
 export const ENDPOINTS = {
   /** Core chat turn */
   CHAT: '/chat',
-  /** Regenerate last assistant turn */
-  CHAT_REGENERATE: '/chat/regenerate',
   /** Message feedback */
   FEEDBACK: '/feedback',
-  /**
-   * Conversation list.
-   * @legacy Not currently exposed by the Kael backend — kept for future use.
-   * Desktop does NOT rely on this endpoint; remove once backend drops it.
-   */
-  CONVERSATIONS: '/conversations',
   /** Liveness / readiness probe */
   HEALTH: '/health',
   /** Full conversation history */
@@ -107,19 +99,6 @@ export interface SendChatMessageResponse {
   timestamp: string
 }
 
-export interface RegenerateTurnRequest {
-  conversationId: string
-  messageId: string
-}
-
-export interface RegenerateTurnResponse {
-  conversationId: string
-  messageId: string
-  content: string
-  role: 'assistant'
-  timestamp: string
-}
-
 export interface SubmitFeedbackRequest {
   messageId: string
   conversationId: string
@@ -130,14 +109,6 @@ export interface SubmitFeedbackRequest {
 export interface SubmitFeedbackResponse {
   success: boolean
   feedbackId: string
-}
-
-export interface ConversationResponse {
-  id: string
-  title?: string
-  createdAt: string
-  lastMessageAt?: string
-  messageCount: number
 }
 
 // ── History / context / SSE types ─────────────────────────────────────────────
@@ -201,12 +172,6 @@ function asString(value: unknown, fallback: string): string {
   return fallback
 }
 
-/** Coerce an unknown value to number, returning the fallback if not a number. */
-function asNumber(value: unknown, fallback: number): number {
-  if (typeof value === 'number' && !isNaN(value)) return value
-  return fallback
-}
-
 // ── Adapter ───────────────────────────────────────────────────────────────────
 
 /**
@@ -245,30 +210,6 @@ export class BackendContractAdapter {
   }
 
   /**
-   * Regenerate the last assistant turn.
-   * Maps to: POST /chat/regenerate
-   */
-  async regenerateTurn(
-    request: RegenerateTurnRequest
-  ): Promise<RegenerateTurnResponse> {
-    const data = await transportFetchJson<Record<string, unknown>>(ENDPOINTS.CHAT_REGENERATE, {
-      method: 'POST',
-      body: JSON.stringify({
-        conversation_id: request.conversationId,
-        message_id: request.messageId,
-      }),
-    })
-
-    return {
-      conversationId: asString(data.conversation_id ?? data.conversationId, ''),
-      messageId: asString(data.message_id ?? data.messageId, request.messageId),
-      content: asString(data.content ?? data.message, ''),
-      role: 'assistant',
-      timestamp: asString(data.timestamp, new Date().toISOString()),
-    }
-  }
-
-  /**
    * Submit feedback on a message.
    * Maps to: POST /feedback
    */
@@ -292,78 +233,13 @@ export class BackendContractAdapter {
   }
 
   /**
-   * Get conversation list.
-   * Maps to: GET /conversations (may return 404 if not implemented)
-   * @legacy Not currently exposed by the Kael backend — kept for backward compatibility.
-   * @deprecated Use chat history endpoints instead.
-   */
-  async getConversations(): Promise<ConversationResponse[]> {
-    try {
-      const data = await transportFetchJson<unknown>(ENDPOINTS.CONVERSATIONS, {
-        method: 'GET',
-      })
-
-      const conversations = Array.isArray(data)
-        ? data
-        : (data as Record<string, unknown>).conversations ?? []
-
-      return (conversations as Record<string, unknown>[]).map((conv) => ({
-        id: asString(conv.id ?? conv.conversation_id, `conv-${Date.now()}`),
-        title: typeof conv.title === 'string' ? conv.title : undefined,
-        createdAt: asString(conv.created_at ?? conv.createdAt, new Date().toISOString()),
-        lastMessageAt: typeof conv.last_message_at === 'string'
-          ? conv.last_message_at
-          : typeof conv.lastMessageAt === 'string'
-          ? conv.lastMessageAt
-          : undefined,
-        messageCount: asNumber(conv.message_count ?? conv.messageCount, 0),
-      }))
-    } catch (err) {
-      // Gracefully degrade when the endpoint is not yet available
-      console.warn('Failed to fetch conversations:', err)
-      return []
-    }
-  }
-
-  /**
-   * Create a new conversation.
-   * Maps to: POST /conversations (may return 404 if not implemented)
-   * @legacy Not currently exposed by the Kael backend — kept for backward compatibility.
-   * @deprecated Use chat history endpoints instead.
-   */
-  async createConversation(title?: string): Promise<ConversationResponse> {
-    try {
-      const data = await transportFetchJson<Record<string, unknown>>(ENDPOINTS.CONVERSATIONS, {
-        method: 'POST',
-        body: JSON.stringify({ title }),
-      })
-
-      return {
-        id: asString(data.id ?? data.conversation_id, `conv-${Date.now()}`),
-        title: typeof data.title === 'string' ? data.title : undefined,
-        createdAt: asString(data.created_at ?? data.createdAt, new Date().toISOString()),
-        messageCount: 0,
-      }
-    } catch (err) {
-      // If endpoint doesn't exist, create locally
-      console.warn('Conversation creation endpoint not available:', err)
-      return {
-        id: `conv-${Date.now()}`,
-        title,
-        createdAt: new Date().toISOString(),
-        messageCount: 0,
-      }
-    }
-  }
-
-  /**
    * Fetch full conversation history messages.
    * Maps to: GET /chat/history/messages
    */
   async getChatHistoryMessages(conversationId?: string): Promise<ChatHistoryMessage[]> {
     try {
       const path = conversationId
-        ? `${ENDPOINTS.CHAT_HISTORY_MESSAGES}?conversation_id=${encodeURIComponent(conversationId)}`
+        ? `${ENDPOINTS.CHAT_HISTORY_MESSAGES}?session_id=${encodeURIComponent(conversationId)}`
         : ENDPOINTS.CHAT_HISTORY_MESSAGES
 
       const data = await transportFetchJson<unknown>(path, { method: 'GET' })
@@ -388,7 +264,7 @@ export class BackendContractAdapter {
   async getChatHistoryPending(conversationId?: string): Promise<ChatPendingMessage[]> {
     try {
       const path = conversationId
-        ? `${ENDPOINTS.CHAT_HISTORY_PENDING}?conversation_id=${encodeURIComponent(conversationId)}`
+        ? `${ENDPOINTS.CHAT_HISTORY_PENDING}?session_id=${encodeURIComponent(conversationId)}`
         : ENDPOINTS.CHAT_HISTORY_PENDING
 
       const data = await transportFetchJson<unknown>(path, { method: 'GET' })
@@ -413,7 +289,7 @@ export class BackendContractAdapter {
   async getChatContextRecent(conversationId?: string): Promise<ChatContextRecent | null> {
     try {
       const path = conversationId
-        ? `${ENDPOINTS.CHAT_CONTEXT_RECENT}?conversation_id=${encodeURIComponent(conversationId)}`
+        ? `${ENDPOINTS.CHAT_CONTEXT_RECENT}?session_id=${encodeURIComponent(conversationId)}`
         : ENDPOINTS.CHAT_CONTEXT_RECENT
 
       const data = await transportFetchJson<Record<string, unknown>>(path, { method: 'GET' })
