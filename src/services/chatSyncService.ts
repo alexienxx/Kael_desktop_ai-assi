@@ -19,6 +19,12 @@
  *
  * Local KV remains useful as an optimistic / offline cache, but this service
  * treats the backend as the authoritative source while connected.
+ *
+ * ⚠️  RENDERER-PROCESS ONLY
+ * This module imports chatEventsService which depends on the browser
+ * EventSource API.  It MUST only be used from renderer-layer code (React
+ * components, hooks, or other renderer-side modules).  The Electron main
+ * process must never import this service.
  */
 
 import { Message } from '@/lib/types'

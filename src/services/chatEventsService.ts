@@ -14,10 +14,38 @@
  * - Reconnect requires a fresh token acquisition
  * - Deduplication is the caller's responsibility (see ChatSyncService)
  * - No React coupling: this is a plain service class
+ *
+ * ⚠️  RENDERER-PROCESS ONLY
+ * This module uses the browser EventSource API which is not available in
+ * Node.js / Electron main process.  It MUST only be imported from renderer
+ * code (React components, hooks, or renderer-side services such as
+ * chatSyncService).  Importing it from the main process will throw at
+ * module-evaluation time to surface the mistake early.
  */
 
 import { ENDPOINTS, ChatEvent, BackendContractAdapter } from './backendContract'
 import { backendConfigStore } from './backendConfigStore'
+
+/**
+ * Asserts that the current execution environment exposes the browser
+ * EventSource API.  Throws a descriptive error when called from a Node.js /
+ * Electron main-process context so that boundary violations are detected
+ * immediately rather than silently producing confusing runtime behaviour.
+ */
+function assertRendererEnvironment(): void {
+  if (typeof EventSource === 'undefined') {
+    throw new Error(
+      '[chatEventsService] EventSource is not defined. ' +
+        'This module must only be imported in a browser / renderer-process ' +
+        'environment. Do not import it from the Electron main process or any ' +
+        'Node.js context.'
+    )
+  }
+}
+
+// Enforce the renderer boundary at module-evaluation time so that an
+// accidental main-process import fails loudly and immediately.
+assertRendererEnvironment()
 
 export type ChatEventListener = (event: ChatEvent) => void
 
