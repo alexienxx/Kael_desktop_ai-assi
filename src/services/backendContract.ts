@@ -26,10 +26,24 @@ export const ENDPOINTS = {
   CHAT_REGENERATE: '/chat/regenerate',
   /** Message feedback */
   FEEDBACK: '/feedback',
-  /** Conversation list (may return 404 if not implemented yet) */
+  /**
+   * Conversation list.
+   * @legacy Not currently exposed by the Kael backend — kept for future use.
+   * Desktop does NOT rely on this endpoint; remove once backend drops it.
+   */
   CONVERSATIONS: '/conversations',
   /** Liveness / readiness probe */
   HEALTH: '/health',
+  /** Full conversation history */
+  CHAT_HISTORY_MESSAGES: '/chat/history/messages',
+  /** Pending (undelivered) messages since last ack */
+  CHAT_HISTORY_PENDING: '/chat/history/pending',
+  /** Recent context snapshot */
+  CHAT_CONTEXT_RECENT: '/chat/context/recent',
+  /** Server-Sent Events stream */
+  CHAT_EVENTS: '/chat/events',
+  /** Request short-lived SSE token */
+  CHAT_EVENTS_TOKEN: '/chat/events/token',
   /** Agentic repo-awareness endpoints */
   AGENTIC_REPO_STATUS: '/agentic/repo/status',
   AGENTIC_REPO_ANALYZE: '/agentic/repo/analyze',
@@ -124,6 +138,52 @@ export interface ConversationResponse {
   createdAt: string
   lastMessageAt?: string
   messageCount: number
+}
+
+// ── History / context / SSE types ─────────────────────────────────────────────
+
+export interface ChatHistoryMessage {
+  messageId: string
+  conversationId: string
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: string
+}
+
+export interface ChatContextRecent {
+  conversationId: string
+  summary?: string
+  recentMessages: ChatHistoryMessage[]
+}
+
+export interface ChatPendingMessage {
+  messageId: string
+  conversationId: string
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: string
+}
+
+export type ChatEventType =
+  | 'message'
+  | 'message_start'
+  | 'message_end'
+  | 'status'
+  | 'error'
+  | 'ping'
+
+export interface ChatEvent {
+  type: ChatEventType
+  messageId?: string
+  conversationId?: string
+  content?: string
+  timestamp?: string
+  [key: string]: unknown
+}
+
+export interface ChatEventsTokenResponse {
+  token: string
+  expiresAt?: string
 }
 
 export interface HealthCheckResponse {
@@ -234,6 +294,8 @@ export class BackendContractAdapter {
   /**
    * Get conversation list.
    * Maps to: GET /conversations (may return 404 if not implemented)
+   * @legacy Not currently exposed by the Kael backend — kept for backward compatibility.
+   * @deprecated Use chat history endpoints instead.
    */
   async getConversations(): Promise<ConversationResponse[]> {
     try {
@@ -266,6 +328,8 @@ export class BackendContractAdapter {
   /**
    * Create a new conversation.
    * Maps to: POST /conversations (may return 404 if not implemented)
+   * @legacy Not currently exposed by the Kael backend — kept for backward compatibility.
+   * @deprecated Use chat history endpoints instead.
    */
   async createConversation(title?: string): Promise<ConversationResponse> {
     try {
@@ -289,6 +353,134 @@ export class BackendContractAdapter {
         createdAt: new Date().toISOString(),
         messageCount: 0,
       }
+    }
+  }
+
+  /**
+   * Fetch full conversation history messages.
+   * Maps to: GET /chat/history/messages
+   */
+  async getChatHistoryMessages(conversationId?: string): Promise<ChatHistoryMessage[]> {
+    try {
+      const path = conversationId
+        ? `${ENDPOINTS.CHAT_HISTORY_MESSAGES}?conversation_id=${encodeURIComponent(conversationId)}`
+        : ENDPOINTS.CHAT_HISTORY_MESSAGES
+
+      const data = await transportFetchJson<unknown>(path, { method: 'GET' })
+
+      const items: Record<string, unknown>[] = Array.isArray(data)
+        ? (data as Record<string, unknown>[])
+        : Array.isArray((data as Record<string, unknown>).messages)
+        ? ((data as Record<string, unknown>).messages as Record<string, unknown>[])
+        : []
+
+      return items.map((item) => this.coerceChatHistoryMessage(item))
+    } catch (err) {
+      console.warn('[backendContract] getChatHistoryMessages failed:', err)
+      return []
+    }
+  }
+
+  /**
+   * Fetch pending (undelivered/missed) messages.
+   * Maps to: GET /chat/history/pending
+   */
+  async getChatHistoryPending(conversationId?: string): Promise<ChatPendingMessage[]> {
+    try {
+      const path = conversationId
+        ? `${ENDPOINTS.CHAT_HISTORY_PENDING}?conversation_id=${encodeURIComponent(conversationId)}`
+        : ENDPOINTS.CHAT_HISTORY_PENDING
+
+      const data = await transportFetchJson<unknown>(path, { method: 'GET' })
+
+      const items: Record<string, unknown>[] = Array.isArray(data)
+        ? (data as Record<string, unknown>[])
+        : Array.isArray((data as Record<string, unknown>).messages)
+        ? ((data as Record<string, unknown>).messages as Record<string, unknown>[])
+        : []
+
+      return items.map((item) => this.coerceChatHistoryMessage(item))
+    } catch (err) {
+      console.warn('[backendContract] getChatHistoryPending failed:', err)
+      return []
+    }
+  }
+
+  /**
+   * Fetch recent context snapshot.
+   * Maps to: GET /chat/context/recent
+   */
+  async getChatContextRecent(conversationId?: string): Promise<ChatContextRecent | null> {
+    try {
+      const path = conversationId
+        ? `${ENDPOINTS.CHAT_CONTEXT_RECENT}?conversation_id=${encodeURIComponent(conversationId)}`
+        : ENDPOINTS.CHAT_CONTEXT_RECENT
+
+      const data = await transportFetchJson<Record<string, unknown>>(path, { method: 'GET' })
+
+      const convId = asString(data.conversation_id ?? data.conversationId, conversationId ?? '')
+      const recentRaw = Array.isArray(data.recent_messages)
+        ? (data.recent_messages as Record<string, unknown>[])
+        : Array.isArray(data.recentMessages)
+        ? (data.recentMessages as Record<string, unknown>[])
+        : []
+
+      return {
+        conversationId: convId,
+        summary: typeof data.summary === 'string' ? data.summary : undefined,
+        recentMessages: recentRaw.map((item) => this.coerceChatHistoryMessage(item)),
+      }
+    } catch (err) {
+      console.warn('[backendContract] getChatContextRecent failed:', err)
+      return null
+    }
+  }
+
+  /**
+   * Coerce an unknown payload item into a ChatHistoryMessage.
+   */
+  private coerceChatHistoryMessage(item: Record<string, unknown>): ChatHistoryMessage {
+    const rawRole = item.role ?? item.sender
+    const role: 'user' | 'assistant' =
+      rawRole === 'user' || rawRole === 'assistant' ? rawRole : 'assistant'
+
+    return {
+      messageId: asString(item.message_id ?? item.messageId ?? item.id, `msg-${Date.now()}`),
+      conversationId: asString(item.conversation_id ?? item.conversationId, ''),
+      role,
+      content: asString(item.content ?? item.text ?? item.message, ''),
+      timestamp: asString(item.timestamp, new Date().toISOString()),
+    }
+  }
+
+  /**
+   * Request a short-lived single-use token for SSE authentication.
+   * Maps to: POST /chat/events/token
+   */
+  async requestChatEventsToken(conversationId?: string): Promise<ChatEventsTokenResponse> {
+    try {
+      const body: Record<string, unknown> = {}
+      if (conversationId) {
+        body.conversation_id = conversationId
+      }
+
+      const data = await transportFetchJson<Record<string, unknown>>(
+        ENDPOINTS.CHAT_EVENTS_TOKEN,
+        {
+          method: 'POST',
+          body: JSON.stringify(body),
+        }
+      )
+
+      return {
+        token: asString(data.token, ''),
+        expiresAt: typeof data.expires_at === 'string' || typeof data.expiresAt === 'string'
+          ? (data.expires_at as string) ?? (data.expiresAt as string)
+          : undefined,
+      }
+    } catch (err) {
+      console.warn('[backendContract] requestChatEventsToken failed:', err)
+      throw err
     }
   }
 
