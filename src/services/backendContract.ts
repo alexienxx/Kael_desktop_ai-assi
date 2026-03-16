@@ -26,7 +26,11 @@ export const ENDPOINTS = {
   CHAT_REGENERATE: '/chat/regenerate',
   /** Message feedback */
   FEEDBACK: '/feedback',
-  /** Conversation list (may return 404 if not implemented yet) */
+  /**
+   * Conversation list.
+   * @legacy Not currently exposed by the Kael backend — kept for future use.
+   * Desktop does NOT rely on this endpoint; remove once backend drops it.
+   */
   CONVERSATIONS: '/conversations',
   /** Liveness / readiness probe */
   HEALTH: '/health',
@@ -290,6 +294,8 @@ export class BackendContractAdapter {
   /**
    * Get conversation list.
    * Maps to: GET /conversations (may return 404 if not implemented)
+   * @legacy Not currently exposed by the Kael backend — kept for backward compatibility.
+   * @deprecated Use chat history endpoints instead.
    */
   async getConversations(): Promise<ConversationResponse[]> {
     try {
@@ -322,6 +328,8 @@ export class BackendContractAdapter {
   /**
    * Create a new conversation.
    * Maps to: POST /conversations (may return 404 if not implemented)
+   * @legacy Not currently exposed by the Kael backend — kept for backward compatibility.
+   * @deprecated Use chat history endpoints instead.
    */
   async createConversation(title?: string): Promise<ConversationResponse> {
     try {
