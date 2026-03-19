@@ -42,10 +42,50 @@ function fetchDiagnostic<T>(path: string, opts?: TransportOptions): Promise<T> {
   return transportFetchJson<T>(path, { method: 'GET', ...opts })
 }
 
+// ── Backend → frontend response mappings ──────────────────────────────────────
+//
+// The Kael backend returns shapes that differ slightly from the UI types.
+// These mappers normalise responses so panels always get the expected types.
+
+interface BackendIdentityResponse {
+  active_persona?: string
+  blend?: Record<string, number>
+  identity_alignment?: number
+  timestamp?: number
+}
+
+interface BackendMemoryResponse {
+  long_term_items?: number
+  symbolic_motifs?: number | string[]
+  timeline_events?: number
+  recall_confidence?: number
+  timestamp?: number
+}
+
+interface BackendAutonomyResponse {
+  initiative_score?: number
+  last_event?: {
+    reason?: string
+    action?: string
+    confidence?: number
+    timestamp?: number
+  } | null
+  timestamp?: number
+}
+
 // ── Public fetch functions ────────────────────────────────────────────────────
 
 export async function fetchIdentity(opts?: TransportOptions): Promise<IdentityData> {
-  return fetchDiagnostic<IdentityData>(DIAGNOSTIC_ENDPOINTS.IDENTITY, opts)
+  const raw = await fetchDiagnostic<BackendIdentityResponse>(DIAGNOSTIC_ENDPOINTS.IDENTITY, opts)
+  // Backend returns { blend: { baseline, mentor, dominant }, identity_alignment }
+  // UI expects { baseline, mentor, dominant, identity_alignment }
+  const blend = raw.blend ?? {}
+  return {
+    baseline: blend.baseline ?? 0,
+    mentor: blend.mentor ?? 0,
+    dominant: blend.dominant ?? 0,
+    identity_alignment: raw.identity_alignment ?? 0,
+  }
 }
 
 export async function fetchDrift(opts?: TransportOptions): Promise<DriftData> {
@@ -53,7 +93,17 @@ export async function fetchDrift(opts?: TransportOptions): Promise<DriftData> {
 }
 
 export async function fetchMemory(opts?: TransportOptions): Promise<MemoryData> {
-  return fetchDiagnostic<MemoryData>(DIAGNOSTIC_ENDPOINTS.MEMORY, opts)
+  const raw = await fetchDiagnostic<BackendMemoryResponse>(DIAGNOSTIC_ENDPOINTS.MEMORY, opts)
+  // Backend returns { long_term_items: number, symbolic_motifs: number }
+  // UI expects  { long_term_count: number, symbolic_motifs: string[] }
+  return {
+    long_term_count: raw.long_term_items ?? 0,
+    symbolic_motifs: Array.isArray(raw.symbolic_motifs)
+      ? raw.symbolic_motifs
+      : [],
+    timeline_events: raw.timeline_events ?? 0,
+    recall_confidence: raw.recall_confidence ?? 0,
+  }
 }
 
 export async function fetchRuntime(opts?: TransportOptions): Promise<RuntimeData> {
@@ -61,7 +111,20 @@ export async function fetchRuntime(opts?: TransportOptions): Promise<RuntimeData
 }
 
 export async function fetchAutonomy(opts?: TransportOptions): Promise<AutonomyEvent[]> {
-  return fetchDiagnostic<AutonomyEvent[]>(DIAGNOSTIC_ENDPOINTS.AUTONOMY, opts)
+  const raw = await fetchDiagnostic<BackendAutonomyResponse>(DIAGNOSTIC_ENDPOINTS.AUTONOMY, opts)
+  // Backend returns { initiative_score, last_event: { reason, action, confidence, timestamp } }
+  // UI expects AutonomyEvent[]
+  const events: AutonomyEvent[] = []
+  if (raw.last_event) {
+    events.push({
+      id: `${raw.last_event.timestamp ?? Date.now()}-${raw.last_event.reason ?? 'unknown'}`,
+      reason: raw.last_event.reason ?? 'unknown',
+      action: raw.last_event.action ?? 'none',
+      confidence: raw.last_event.confidence ?? 0,
+      timestamp: raw.last_event.timestamp ?? Date.now(),
+    })
+  }
+  return events
 }
 
 // Fallback mock data used when the backend is unreachable or not configured
