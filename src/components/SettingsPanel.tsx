@@ -68,9 +68,13 @@ export function SettingsPanel({
         return 'bg-green-500'
       case 'connecting':
         return 'bg-yellow-500 animate-pulse'
+      case 'backend_starting':
+        return 'bg-red-500 animate-pulse'
       case 'error':
         return 'bg-red-500'
       case 'disconnected':
+        return 'bg-muted-foreground'
+      default:
         return 'bg-muted-foreground'
     }
   }
@@ -81,10 +85,14 @@ export function SettingsPanel({
         return 'Connected'
       case 'connecting':
         return 'Connecting...'
+      case 'backend_starting':
+        return 'Server in avvio...'
       case 'error':
         return 'Connection Error'
       case 'disconnected':
         return 'Disconnected'
+      default:
+        return status
     }
   }
   return (
@@ -258,6 +266,8 @@ export function SettingsPanel({
                     ? 'Backend is connected and ready'
                     : connectionStatus === 'connecting'
                     ? 'Establishing connection to backend...'
+                    : connectionStatus === 'backend_starting'
+                    ? 'Sentinel detected — backend bootstrap in corso...'
                     : connectionStatus === 'error'
                     ? 'Failed to connect. Check your configuration.'
                     : 'Configure backend to connect'

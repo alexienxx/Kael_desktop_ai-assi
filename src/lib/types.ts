@@ -72,6 +72,7 @@ export type ConnectionStatus =
   | 'auth_failed'
   | 'degraded'
   | 'partial'
+  | 'backend_starting'
 
 export interface BackendConfig {
   baseUrl: string

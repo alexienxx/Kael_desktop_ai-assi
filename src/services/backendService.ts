@@ -15,6 +15,7 @@ import { BackendContractAdapter, resolveMediaUrl } from './backendContract'
 import { backendConfigStore } from './backendConfigStore'
 import { TransportError } from './backendTransport'
 import { conversationManager } from './conversationManager'
+import { deriveSentinelUrl, probeSentinel, requestBootstrap } from './sentinelService'
 
 type ConnectionStatusListener = (status: ConnectionStatus) => void
 
@@ -42,6 +43,10 @@ export class BackendService {
   // Request cancellation
   private pendingRequests: Set<AbortController> = new Set()
 
+  // Sentinel auto-start tracking
+  private sentinelAttempted = false
+  private sentinelPollTimer: ReturnType<typeof setTimeout> | null = null
+
   constructor() {
     // Private constructor for singleton
   }
@@ -50,6 +55,9 @@ export class BackendService {
    * Configure the backend service.
    * Also updates backendConfigStore so that diagnostic services share the
    * same configuration without reading from KV independently.
+   *
+   * If the initial health check fails, probes the Kael Sentinel and
+   * triggers backend auto-start before falling back to reconnect.
    */
   configure(config: BackendConfig): void {
     const isReconfiguration = this.config !== null
@@ -59,9 +67,11 @@ export class BackendService {
       this.cancelPendingRequests()
       this.stopHealthCheck()
       this.stopReconnect()
+      this.stopSentinelPoll()
     }
 
     this.config = config
+    this.sentinelAttempted = false
 
     // Propagate to the canonical config store so other services (e.g.
     // controlCenterService) automatically pick up the new settings.
@@ -81,7 +91,13 @@ export class BackendService {
         this.reconnectAttempts = 0
         this.startHealthCheck()
       })
-      .catch((err) => {
+      .catch(async (err) => {
+        // Health check failed — try sentinel auto-start before reconnecting
+        if (this.connectionStatus !== 'auth_failed' && !this.sentinelAttempted) {
+          const autostartSuccess = await this.attemptSentinelAutostart()
+          if (autostartSuccess) return // Sentinel polling now handles the rest
+        }
+
         this.setConnectionStatus(this.classifyError(err))
         if (this.connectionStatus !== 'auth_failed') {
           this.startReconnect()
@@ -96,6 +112,7 @@ export class BackendService {
     this.cancelPendingRequests()
     this.stopHealthCheck()
     this.stopReconnect()
+    this.stopSentinelPoll()
 
     this.adapter = null
     this.config = null
@@ -329,6 +346,103 @@ export class BackendService {
     }
     this.reconnectAttempts = 0
   }
+
+  // ── Sentinel auto-start ──────────────────────────────────────────────────
+
+  /**
+   * Attempt to wake the main backend via the Kael Sentinel.
+   *
+   * Flow:
+   *   1. Derive sentinel URL from configured backend URL
+   *   2. Probe sentinel health
+   *   3. If sentinel alive → POST /start → poll for backend
+   *   4. On success → 'connected'; on timeout → fall through to reconnect
+   *
+   * Returns true if sentinel polling was started (caller should NOT
+   * start reconnect). Returns false to let the caller handle normally.
+   */
+  private async attemptSentinelAutostart(): Promise<boolean> {
+    this.sentinelAttempted = true
+
+    if (!this.config?.baseUrl) return false
+
+    const sentinelUrl = deriveSentinelUrl(this.config.baseUrl)
+    console.log(`[BackendService] Probing sentinel at ${sentinelUrl}...`)
+
+    const alive = await probeSentinel(sentinelUrl)
+    if (!alive) {
+      console.log('[BackendService] Sentinel not reachable, skipping auto-start')
+      return false
+    }
+
+    // Sentinel is alive — request bootstrap
+    this.setConnectionStatus('backend_starting')
+    console.log('[BackendService] Sentinel alive, requesting backend bootstrap...')
+
+    try {
+      const result = await requestBootstrap(sentinelUrl)
+
+      if (!result.started && result.reason === 'backend_already_running') {
+        // Race condition: backend came up between our check and sentinel call
+        this.setConnectionStatus('connected')
+        this.startHealthCheck()
+        return true
+      }
+
+      if (!result.started && result.reason !== 'bootstrap_already_in_progress') {
+        console.warn(`[BackendService] Sentinel refused start: ${result.reason}`)
+        return false
+      }
+
+      // Bootstrap triggered or already in progress — poll for health
+      this.startSentinelPoll()
+      return true
+    } catch (err) {
+      console.error('[BackendService] Sentinel bootstrap request failed:', err)
+      return false
+    }
+  }
+
+  /** Poll backend health after sentinel triggered bootstrap (max 120s). */
+  private startSentinelPoll(): void {
+    const POLL_INTERVAL = 3_000
+    const TIMEOUT = 120_000
+    const startTime = Date.now()
+
+    const tick = async () => {
+      if (Date.now() - startTime > TIMEOUT) {
+        console.warn('[BackendService] Sentinel bootstrap timeout')
+        this.sentinelPollTimer = null
+        this.setConnectionStatus('error')
+        this.startReconnect()
+        return
+      }
+
+      try {
+        await this.performHealthCheck()
+        // Success!
+        this.sentinelPollTimer = null
+        this.setConnectionStatus('connected')
+        this.reconnectAttempts = 0
+        this.startHealthCheck()
+      } catch {
+        // Not ready yet — keep polling
+        this.sentinelPollTimer = setTimeout(tick, POLL_INTERVAL)
+      }
+    }
+
+    this.sentinelPollTimer = setTimeout(tick, POLL_INTERVAL)
+  }
+
+  /** Stop sentinel polling if active. */
+  private stopSentinelPoll(): void {
+    if (this.sentinelPollTimer) {
+      clearTimeout(this.sentinelPollTimer)
+      this.sentinelPollTimer = null
+    }
+  }
+
+  // ── Error handling ───────────────────────────────────────────────────────
 
   /**
    * Classify an error into the appropriate ConnectionStatus.
