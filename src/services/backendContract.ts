@@ -100,15 +100,15 @@ export interface SendChatMessageResponse {
 }
 
 export interface SubmitFeedbackRequest {
-  messageId: string
-  conversationId: string
-  rating: 'positive' | 'negative'
-  comment?: string
+  turnId: string
+  feedbackType: 'like' | 'dislike'
 }
 
 export interface SubmitFeedbackResponse {
-  success: boolean
-  feedbackId: string
+  ok: boolean
+  feedback_count: number
+  cap_reached: boolean
+  score?: number
 }
 
 // ── History / context / SSE types ─────────────────────────────────────────────
@@ -230,16 +230,16 @@ export class BackendContractAdapter {
     const data = await transportFetchJson<Record<string, unknown>>(ENDPOINTS.FEEDBACK, {
       method: 'POST',
       body: JSON.stringify({
-        message_id: request.messageId,
-        conversation_id: request.conversationId,
-        rating: request.rating,
-        comment: request.comment,
+        turn_id: request.turnId,
+        feedback_type: request.feedbackType,
       }),
     })
 
     return {
-      success: data.success !== false,
-      feedbackId: asString(data.feedback_id ?? data.feedbackId, `feedback-${Date.now()}`),
+      ok: data.ok !== false,
+      feedback_count: typeof data.feedback_count === 'number' ? data.feedback_count : 0,
+      cap_reached: data.cap_reached === true,
+      score: typeof data.score === 'number' ? data.score : undefined,
     }
   }
 

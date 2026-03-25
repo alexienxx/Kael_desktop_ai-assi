@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useKV } from '@github/spark/hooks'
+import { AnimatePresence } from 'framer-motion'
 import { Sidebar } from '@/components/Sidebar'
 import { ChatWindow } from '@/components/ChatWindow'
 import { Composer } from '@/components/Composer'
@@ -7,6 +8,7 @@ import { SettingsPanel } from '@/components/SettingsPanel'
 import { MediaPanel } from '@/components/MediaPanel'
 import { ControlCenter } from '@/components/ControlCenter'
 import { ServicesPanel } from '@/components/services/ServicesPanel'
+import { ObservatoryPage } from '@/pages/ObservatoryPage'
 import { Message, Conversation, ThemeSettings, DownloadedMedia, BackendConfig, ConnectionStatus, ServiceContextChip } from '@/lib/types'
 import { defaultThemeSettings, applyThemeSettings, getBubbleClasses } from '@/lib/theme-config'
 import { Toaster } from '@/components/ui/sonner'
@@ -29,6 +31,7 @@ function App() {
   const [mediaOpen, setMediaOpen] = useState(false)
   const [controlCenterOpen, setControlCenterOpen] = useState(false)
   const [servicesOpen, setServicesOpen] = useState(false)
+  const [observatoryOpen, setObservatoryOpen] = useState(false)
   const [serviceContextChips, setServiceContextChips] = useState<ServiceContextChip[]>([])
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected')
   const [sending, setSending] = useState(false)
@@ -395,6 +398,7 @@ function App() {
       <ControlCenter
         open={controlCenterOpen}
         onOpenChange={setControlCenterOpen}
+        onExpandObservatory={() => setObservatoryOpen(true)}
       />
 
       <ServicesPanel
@@ -402,6 +406,13 @@ function App() {
         onOpenChange={setServicesOpen}
         onServiceContextChange={handleServiceContextChange}
       />
+
+      {/* Full Observatory overlay */}
+      <AnimatePresence>
+        {observatoryOpen && (
+          <ObservatoryPage onClose={() => setObservatoryOpen(false)} />
+        )}
+      </AnimatePresence>
 
       <Toaster position="top-right" />
     </div>

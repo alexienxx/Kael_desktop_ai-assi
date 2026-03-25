@@ -211,32 +211,26 @@ export class BackendService {
   }
 
   /**
-   * Submit feedback on a message
+   * Submit feedback on a message (like/dislike → RLHF pipeline).
+   * Uses turn_id + feedback_type to match backend contract.
    */
   async submitFeedback(
-    messageId: string,
-    rating: 'positive' | 'negative',
-    comment?: string
-  ): Promise<void> {
+    turnId: string,
+    feedbackType: 'like' | 'dislike'
+  ): Promise<{ ok: boolean; feedback_count: number; cap_reached: boolean }> {
     if (!this.adapter) {
       throw new Error('Backend not configured')
     }
 
-    const conversationId = conversationManager.getActiveConversationId()
-    if (!conversationId) {
-      throw new Error('No active conversation')
-    }
-
     try {
-      await this.adapter.submitFeedback({
-        messageId,
-        conversationId,
-        rating,
-        comment,
+      return await this.adapter.submitFeedback({
+        turnId,
+        feedbackType,
       })
     } catch (error) {
       console.error('Failed to submit feedback:', error)
       // Don't trigger reconnect for feedback errors
+      return { ok: false, feedback_count: 0, cap_reached: false }
     }
   }
 
