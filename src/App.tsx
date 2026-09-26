@@ -18,6 +18,7 @@ import { mediaService } from '@/services/mediaService'
 import { conversationManager } from '@/services/conversationManager'
 import { backendConfigStore } from '@/services/backendConfigStore'
 import { chatSyncService } from '@/services/chatSyncService'
+import { nativeVoiceService } from '@/services/nativeVoiceService'
 
 function App() {
   const [conversations, setConversations] = useKV<Conversation[]>('kael-conversations', [])
@@ -35,6 +36,7 @@ function App() {
   const [serviceContextChips, setServiceContextChips] = useState<ServiceContextChip[]>([])
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected')
   const [sending, setSending] = useState(false)
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null)
 
   // Track the previous connection status so we can detect reconnects
   const prevConnectionStatus = useRef<ConnectionStatus>('disconnected')
@@ -44,6 +46,8 @@ function App() {
   useEffect(() => {
     messagesRef.current = messages || []
   }, [messages])
+
+  useEffect(() => () => { void nativeVoiceService.stop() }, [])
 
   // Apply theme settings on mount and change
   useEffect(() => {
@@ -188,7 +192,7 @@ function App() {
 
     // Create user message immediately
     const userMessage: Message = {
-      id: `msg-${Date.now()}`,
+      id: globalThis.crypto.randomUUID(),
       role: 'user',
       content: { type: 'text', text },
       timestamp: new Date(),
@@ -216,7 +220,7 @@ function App() {
     if (backendService.isConnected()) {
       setSending(true)
       try {
-        const response = await backendService.sendMessage(text)
+        const response = await backendService.sendMessage(text, userMessage.id)
 
         // Create assistant message from backend response
         const assistantMessage: Message = {
@@ -224,7 +228,8 @@ function App() {
           role: 'assistant',
           content: { type: 'text', text: response.content },
           timestamp: new Date(response.timestamp),
-          conversationId: response.conversationId
+          conversationId: response.conversationId,
+          assistantTurnId: response.assistantTurnId,
         }
 
         setMessages((current) => [...(current || []), assistantMessage])
@@ -252,6 +257,35 @@ function App() {
       } finally {
         setSending(false)
       }
+    }
+  }
+
+  const handleSpeak = async (message: Message) => {
+    if (speakingMessageId === message.id) {
+      await nativeVoiceService.stop()
+      setSpeakingMessageId(null)
+      return
+    }
+    if (!message.assistantTurnId) return
+    if (speakingMessageId) {
+      // Releasing the previous AudioContext crosses an async boundary and can
+      // consume the browser's transient user activation. This click therefore
+      // performs the guaranteed local stop; a fresh click starts the selected
+      // turn with a fresh, valid activation.
+      await nativeVoiceService.stop()
+      setSpeakingMessageId(null)
+      return
+    }
+    setSpeakingMessageId(message.id)
+    try {
+      await nativeVoiceService.playAssistantTurn(
+        message.assistantTurnId, message.conversationId
+      )
+    } catch (error) {
+      console.error('Native voice playback failed:', error)
+      toast.error(error instanceof Error ? error.message : 'Voice playback failed')
+    } finally {
+      setSpeakingMessageId(current => current === message.id ? null : current)
     }
   }
 
@@ -367,6 +401,8 @@ function App() {
           themeSettings={themeSettings || defaultThemeSettings}
           bubbleClasses={getBubbleStyleForRole}
           onMediaDownload={handleMediaDownload}
+          onSpeak={handleSpeak}
+          speakingMessageId={speakingMessageId}
           onOpenServices={() => setServicesOpen(true)}
           serviceContextChips={serviceContextChips}
           onRemoveContextChip={handleRemoveContextChip}

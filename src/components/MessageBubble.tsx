@@ -2,15 +2,20 @@ import { Message } from '@/lib/types'
 import { AudioMessageCard } from './AudioMessageCard'
 import { ImageMessageCard } from './ImageMessageCard'
 import { formatDistanceToNow } from 'date-fns'
+import { SpeakerHigh, StopCircle } from '@phosphor-icons/react'
+import { Button } from '@/components/ui/button'
 
 interface MessageBubbleProps {
   message: Message
   bubbleClasses: string
   showTimestamp: boolean
   onMediaDownload: (messageId: string, type: 'image' | 'audio') => void
+  onSpeak: (message: Message) => void
+  speaking: boolean
 }
 
-export function MessageBubble({ message, bubbleClasses, showTimestamp, onMediaDownload }: MessageBubbleProps) {
+export function MessageBubble({ message, bubbleClasses, showTimestamp, onMediaDownload,
+  onSpeak, speaking }: MessageBubbleProps) {
   const isUser = message.role === 'user'
   const isExternalAgent = message.role === 'external_agent'
 
@@ -63,6 +68,21 @@ export function MessageBubble({ message, bubbleClasses, showTimestamp, onMediaDo
           </span>
         )}
         {renderContent()}
+        {!isUser && !isExternalAgent && message.content.type === 'text'
+          && message.assistantTurnId && (
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="mt-1 h-8 w-8 rounded-full"
+            aria-label={speaking ? 'Interrompi la voce di Arrakis' : 'Ascolta Arrakis'}
+            onClick={() => onSpeak(message)}
+          >
+            {speaking
+              ? <StopCircle weight="fill" className="h-4 w-4" />
+              : <SpeakerHigh weight="fill" className="h-4 w-4" />}
+          </Button>
+        )}
         
         {showTimestamp && (
           <span className="text-xs text-muted-foreground mt-1 px-2">

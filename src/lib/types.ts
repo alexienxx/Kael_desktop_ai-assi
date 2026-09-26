@@ -17,6 +17,8 @@ export interface Message {
   content: MessageContent
   timestamp: Date
   conversationId: string
+  /** Canonical PostgreSQL assistant turn eligible for exact-surface speech. */
+  assistantTurnId?: number
   /** Present only when role === 'external_agent' */
   externalAgentId?: string
   /** Present only when role === 'external_agent' */

@@ -159,11 +159,12 @@ export class BackendService {
   /**
    * Send a chat message
    */
-  async sendMessage(message: string): Promise<{
+  async sendMessage(message: string, clientMessageId: string): Promise<{
     conversationId: string
     messageId: string
     content: string
     timestamp: string
+    assistantTurnId?: number
   }> {
     if (!this.adapter) {
       throw new Error('Backend not configured')
@@ -179,6 +180,7 @@ export class BackendService {
       const response = await this.adapter.sendChatMessage({
         conversationId,
         message,
+        clientMessageId,
       })
 
       // Sync conversation ID from backend
@@ -203,11 +205,12 @@ export class BackendService {
     messageId: string
     content: string
     timestamp: string
+    assistantTurnId?: number
   }> {
     // Streaming not yet implemented - fallback to regular send
     // This is prepared for future streaming support
     console.warn('Streaming not yet enabled, falling back to regular send')
-    return this.sendMessage(message)
+    return this.sendMessage(message, globalThis.crypto.randomUUID())
   }
 
   /**

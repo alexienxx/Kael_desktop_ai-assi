@@ -70,32 +70,36 @@ export class NativePcmPlayer {
     void this.closed.catch(() => {})
   }
 
-  static async open(binding: NativeVoiceBinding,
+  static async open(bindingInput: NativeVoiceBinding | Promise<NativeVoiceBinding>,
     onReport: (report: NativePlayoutReport) => void | Promise<void>): Promise<NativePcmPlayer> {
-    if (typeof binding.deliveryId !== 'string' || !binding.deliveryId
-        || typeof binding.utteranceId !== 'string'
-        || !/^[A-Za-z0-9_.:-]{1,96}$/.test(binding.utteranceId)
-        || !Number.isSafeInteger(binding.epoch) || binding.epoch < 0) {
-      throw new Error('AUDIO_PLAYER_BINDING_INVALID')
-    }
     if (NativePcmPlayer.occupied) throw new Error('AUDIO_PLAYER_BUSY')
     NativePcmPlayer.occupied = true
-    const player = new NativePcmPlayer(Object.freeze({ ...binding }), onReport)
+    let context: AudioContext | null = null
     let startupTimer: ReturnType<typeof setTimeout> | undefined
     try {
-      player.context = new AudioContext({ sampleRate: 24000, latencyHint: 'interactive' })
-      // Invoke resume synchronously in the user-gesture chain, before module I/O.
-      const resumed = player.context.resume()
-      await Promise.race([
-        Promise.all([resumed, player.context.audioWorklet.addModule(
-          `${import.meta.env.BASE_URL}audio/arrakis-pcm-worklet.js`)]),
+      context = new AudioContext({ sampleRate: 24000, latencyHint: 'interactive' })
+      // Invoke resume synchronously in the user-gesture chain. The server may
+      // resolve its binding while the worklet loads without losing activation.
+      const resumed = context.resume()
+      const [binding] = await Promise.race([
+        Promise.all([Promise.resolve(bindingInput), resumed,
+          context.audioWorklet.addModule(
+            `${import.meta.env.BASE_URL}audio/arrakis-pcm-worklet.js`)]),
         new Promise<never>((_, reject) => {
           startupTimer = setTimeout(() => reject(new Error('AUDIO_PLAYER_START_TIMEOUT')), 10000)
         }),
       ])
-      if (player.context.sampleRate !== 24000 || player.context.state !== 'running') {
+      if (typeof binding.deliveryId !== 'string' || !binding.deliveryId
+          || typeof binding.utteranceId !== 'string'
+          || !/^[A-Za-z0-9_.:-]{1,96}$/.test(binding.utteranceId)
+          || !Number.isSafeInteger(binding.epoch) || binding.epoch < 0) {
+        throw new Error('AUDIO_PLAYER_BINDING_INVALID')
+      }
+      if (context.sampleRate !== 24000 || context.state !== 'running') {
         throw new Error('AUDIO_PLAYER_CONTEXT_UNAVAILABLE')
       }
+      const player = new NativePcmPlayer(Object.freeze({ ...binding }), onReport)
+      player.context = context
       player.node = new AudioWorkletNode(player.context, 'arrakis-pcm-v1', {
         numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [1],
         processorOptions: binding,
@@ -107,7 +111,17 @@ export class NativePcmPlayer {
       player.deadline = setTimeout(() => player.fail('AUDIO_PLAYER_DEADLINE'), 45000)
       return player
     } catch (error) {
-      player.release()
+      let closeConfirmed = !context || context.state === 'closed'
+      if (context && context.state !== 'closed') {
+        try {
+          await context.close()
+          closeConfirmed = true
+        } catch {
+          console.error('AUDIO_PLAYER_CLOSE_UNCONFIRMED')
+        }
+      }
+      if (!closeConfirmed) throw new Error('AUDIO_PLAYER_CLOSE_UNCONFIRMED')
+      NativePcmPlayer.occupied = false
       throw error
     } finally { if (startupTimer) clearTimeout(startupTimer) }
   }
