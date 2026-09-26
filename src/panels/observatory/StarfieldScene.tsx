@@ -142,13 +142,20 @@ export default function StarfieldScene({ snapshot, selectedNodeId, onSelectNode 
     let renderTimer = 0
     let renderPending = false
     let lastRenderAt = 0
+    let released = false
+    let resizeObserver: ResizeObserver | null = null
     const frameInterval = 1000 / 30
     const requestRender = () => {
-      if (renderPending || document.hidden) return
+      if (released || renderPending || document.hidden) return
       renderPending = true
       const delay = Math.max(0, frameInterval - (performance.now() - lastRenderAt))
       renderTimer = window.setTimeout(() => {
+        if (released) {
+          renderPending = false
+          return
+        }
         frameId = window.requestAnimationFrame((timestamp) => {
+          if (released) return
           renderPending = false
           lastRenderAt = timestamp
           renderer.render(scene, camera)
@@ -158,13 +165,14 @@ export default function StarfieldScene({ snapshot, selectedNodeId, onSelectNode 
     requestRenderRef.current = requestRender
     controls.addEventListener('change', requestRender)
 
-    const onContextLost = (event: Event) => {
-      event.preventDefault()
+    const onContextLost = (_event: Event) => {
+      releaseScene(false)
       setWebglError('WebGL context lost; the read-only projection was released.')
     }
     renderer.domElement.addEventListener('webglcontextlost', onContextLost)
 
     const resize = () => {
+      if (released) return
       const width = Math.max(host.clientWidth, 1)
       const height = Math.max(host.clientHeight, 1)
       camera.aspect = width / height
@@ -172,11 +180,12 @@ export default function StarfieldScene({ snapshot, selectedNodeId, onSelectNode 
       renderer.setSize(width, height, false)
       requestRender()
     }
-    const resizeObserver = new ResizeObserver(resize)
+    resizeObserver = new ResizeObserver(resize)
     resizeObserver.observe(host)
     resize()
 
     const onVisibilityChange = () => {
+      if (released) return
       if (document.hidden) {
         renderPending = false
         window.clearTimeout(renderTimer)
@@ -188,13 +197,17 @@ export default function StarfieldScene({ snapshot, selectedNodeId, onSelectNode 
     document.addEventListener('visibilitychange', onVisibilityChange)
     requestRender()
 
-    return () => {
+    function releaseScene(forceContextLoss: boolean) {
+      if (released) return
+      released = true
       requestRenderRef.current = () => undefined
       renderPending = false
       window.clearTimeout(renderTimer)
       window.cancelAnimationFrame(frameId)
+      renderTimer = 0
+      frameId = 0
       document.removeEventListener('visibilitychange', onVisibilityChange)
-      resizeObserver.disconnect()
+      resizeObserver?.disconnect()
       renderer.domElement.removeEventListener('pointerdown', onPointerDown)
       renderer.domElement.removeEventListener('webglcontextlost', onContextLost)
       controls.removeEventListener('change', requestRender)
@@ -206,10 +219,12 @@ export default function StarfieldScene({ snapshot, selectedNodeId, onSelectNode 
       scene.clear()
       renderer.renderLists.dispose()
       renderer.dispose()
-      renderer.forceContextLoss()
+      if (forceContextLoss) renderer.forceContextLoss()
       renderer.domElement.remove()
       meshesRef.current.clear()
     }
+
+    return () => releaseScene(true)
   }, [snapshot, onSelectNode])
 
   useEffect(() => {
