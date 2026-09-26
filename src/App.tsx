@@ -446,7 +446,10 @@ function App() {
       {/* Full Observatory overlay */}
       <AnimatePresence>
         {observatoryOpen && (
-          <ObservatoryPage onClose={() => setObservatoryOpen(false)} />
+          <ObservatoryPage
+            activeSessionId={activeConversationId}
+            onClose={() => setObservatoryOpen(false)}
+          />
         )}
       </AnimatePresence>
 
