@@ -56,12 +56,15 @@ human attention and semantic word alignment remain unproved. Stop's frozen
 boundary may undercount genuinely audible audio; it deliberately cannot include
 new samples counted upstream after local mute.
 
-Reports use `arrakis.playout-report.v2` and add client-monotonic durations from
+New reports use `arrakis.playout-report.v3` and add client-monotonic durations from
 player open to the first decoded frame and first Worklet quantum, plus stop
 request to the local gain-mute command and Worklet acknowledgement. The same
 values are carried forward unchanged from `playing` to the terminal report.
 They are never compared with server-monotonic synthesis timings. The mute value
 measures issuance of the local gain command, not physical soundcard silence.
+Interrupted v3 reports also carry one bounded origin and an optional
+client-reported AEC value. Desktop manual stops use `manual`; transport cleanup
+uses `transport_failure`. No device label, raw level or audio is recorded.
 
 No raw PCM, transcript, voice reference, API credential or conversation is
 persisted by this player. The SpeechPlan digest is metadata and contains no

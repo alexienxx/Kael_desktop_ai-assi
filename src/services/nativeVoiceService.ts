@@ -101,7 +101,12 @@ export class NativeVoiceService {
         try { binding = (await transport).binding } catch { /* no durable binding */ }
       }
       if (player) {
-        try { await player.stop() } catch { /* terminal may already be failed */ }
+        try {
+          await player.stop({
+            interruptionOrigin: 'transport_failure',
+            echoCancellationReported: null,
+          })
+        } catch { /* terminal may already be failed */ }
       }
       if (binding) await this.interruptRemote(binding.deliveryId)
       const stoppedByUser = this.pendingStoppedByUser
