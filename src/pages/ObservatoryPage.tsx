@@ -100,7 +100,7 @@ export function ObservatoryPage({ onClose, activeSessionId }: ObservatoryPagePro
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border/40 shrink-0">
         <div className="flex items-center gap-3">
-          <h1 className="text-lg font-semibold">Kael Cognitive Observatory</h1>
+          <h1 className="text-lg font-semibold">Arrakis Cognitive Observatory</h1>
           <div className="flex items-center gap-1.5">
             {starfieldOpen ? (
               <span className="text-xs text-cyan-300">Scoped field</span>

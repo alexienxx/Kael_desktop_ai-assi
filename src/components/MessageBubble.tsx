@@ -20,6 +20,34 @@ export function MessageBubble({ message, bubbleClasses, showTimestamp, onMediaDo
   const isExternalAgent = message.role === 'external_agent'
 
   const renderContent = () => {
+    if (message.deliveryMode === 'voice_note') {
+      const canPlay = !isUser && !isExternalAgent && Boolean(message.assistantTurnId)
+      return (
+        <div className={bubbleClasses}>
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="h-9 w-9 shrink-0 rounded-full"
+              aria-label={canPlay
+                ? (speaking ? 'Interrompi la voce di Arrakis' : 'Ascolta Arrakis')
+                : 'Messaggio vocale'}
+              disabled={!canPlay}
+              onClick={() => canPlay && onSpeak(message)}
+            >
+              {speaking
+                ? <StopCircle weight="fill" className="h-5 w-5" />
+                : <SpeakerHigh weight="fill" className="h-5 w-5" />}
+            </Button>
+            <span className="font-message text-[15px] leading-relaxed">
+              {isUser ? 'Messaggio vocale' : 'Messaggio vocale di Arrakis'}
+            </span>
+          </div>
+        </div>
+      )
+    }
+
     switch (message.content.type) {
       case 'text':
         return (
@@ -68,7 +96,8 @@ export function MessageBubble({ message, bubbleClasses, showTimestamp, onMediaDo
           </span>
         )}
         {renderContent()}
-        {!isUser && !isExternalAgent && message.content.type === 'text'
+        {!isUser && !isExternalAgent && message.deliveryMode !== 'voice_note'
+          && message.content.type === 'text'
           && message.assistantTurnId && (
           <Button
             type="button"

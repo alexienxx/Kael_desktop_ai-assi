@@ -194,6 +194,36 @@ export class BackendService {
     }
   }
 
+  /** Send one local recording through the canonical /audio/notes ingress. */
+  async sendVoiceNote(
+    audio: Blob,
+    clientMessageId: string,
+    conversationId: string,
+    language: 'it' | 'en' = 'it'
+  ): Promise<{
+    conversationId: string
+    messageId: string
+    content: string
+    timestamp: string
+    assistantTurnId?: number
+  }> {
+    if (!this.adapter) throw new Error('Backend not configured')
+    if (!this.isConnected()) throw new Error('Backend not connected')
+    try {
+      const response = await this.adapter.sendVoiceNote({
+        conversationId,
+        clientMessageId,
+        audio,
+        language,
+      })
+      conversationManager.syncConversationId(response.conversationId)
+      return response
+    } catch (error) {
+      this.handleConnectionError(error)
+      throw error
+    }
+  }
+
   /**
    * Send a chat message with streaming (prepared but not enabled)
    */

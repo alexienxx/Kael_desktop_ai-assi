@@ -135,7 +135,7 @@ export function RepoPickerDialog({
                         variant={repo.type === 'self-repo' ? 'default' : 'outline'}
                         className="text-xs px-2 py-0.5"
                       >
-                        {repo.type === 'self-repo' ? 'Kael self-repo' : 'Generic repo'}
+                        {repo.type === 'self-repo' ? 'Repository di Arrakis' : 'Repository generico'}
                       </Badge>
                     </div>
                   </div>

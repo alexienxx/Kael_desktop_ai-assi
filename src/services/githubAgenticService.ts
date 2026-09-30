@@ -110,7 +110,7 @@ export class GitHubAgenticService {
         fullName: 'xxalexienxx/kael-desktop-ai-assi',
         type: 'self-repo',
         url: 'https://github.com/xxalexienxx/kael-desktop-ai-assi',
-        description: 'Kael Desktop AI Assistant',
+        description: 'Arrakis Desktop',
         isPrivate: false,
         lastUpdated: new Date(),
       },
@@ -120,7 +120,7 @@ export class GitHubAgenticService {
         fullName: 'xxalexienxx/kael-nexus-hub',
         type: 'self-repo',
         url: 'https://github.com/xxalexienxx/kael-nexus-hub',
-        description: 'Kael Nexus Hub',
+        description: 'Arrakis Hub',
         isPrivate: false,
         lastUpdated: new Date(),
       },
@@ -198,7 +198,7 @@ export class GitHubAgenticService {
    * Get repo type badge label
    */
   getRepoTypeBadge(type: RepoType): string {
-    return type === 'self-repo' ? 'Kael self-repo' : 'Generic repo'
+    return type === 'self-repo' ? 'Repository di Arrakis' : 'Repository generico'
   }
 }
 

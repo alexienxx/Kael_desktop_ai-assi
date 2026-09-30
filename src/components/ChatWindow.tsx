@@ -69,7 +69,7 @@ export function ChatWindow({
             </div>
             <h2 className="text-2xl font-semibold text-foreground">Start a conversation</h2>
             <p className="text-muted-foreground">
-              Send a message to begin chatting with Kael
+              Invia un messaggio per iniziare a parlare con Arrakis
             </p>
           </div>
         </div>

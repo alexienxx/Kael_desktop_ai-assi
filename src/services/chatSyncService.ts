@@ -196,20 +196,27 @@ export class ChatSyncService {
     this.unsubscribeEvents = this.eventsService.onEvent((event) => {
       // We only care about incoming message events from the backend
       if (
+        event.type !== 'new_message' &&
         event.type !== 'message' &&
         event.type !== 'message_end'
       ) return
 
-      if (!event.content || !event.messageId) return
+      if (!event.messageId) return
+      if (!event.content && event.deliveryMode !== 'voice_note') return
+      if (event.deliveryMode === 'voice_note' && (
+        !Number.isSafeInteger(event.assistantTurnId) || Number(event.assistantTurnId) < 1
+      )) return
 
       const role = event.role ?? 'assistant'
 
       const msg: Message = {
         id: event.messageId,
         role,
-        content: { type: 'text', text: event.content },
+        content: { type: 'text', text: event.content ?? '' },
         timestamp: event.timestamp ? new Date(event.timestamp) : new Date(),
         conversationId: event.conversationId ?? '',
+        assistantTurnId: role === 'assistant' ? event.assistantTurnId : undefined,
+        deliveryMode: event.deliveryMode === 'voice_note' ? 'voice_note' : 'text',
         ...(role === 'external_agent' && {
           externalAgentId: event.externalAgentId,
           externalAgentName: event.externalAgentName,
