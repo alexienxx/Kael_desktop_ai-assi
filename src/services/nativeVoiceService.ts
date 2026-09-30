@@ -69,6 +69,10 @@ export class NativeVoiceService {
         deliveryId: requiredHeader(response, 'X-Arrakis-Delivery-Id'),
         utteranceId: requiredHeader(response, 'X-Arrakis-Utterance-Id'),
         epoch: parseSafeInteger(requiredHeader(response, 'X-Arrakis-Epoch')),
+        speechPlanSha256: requiredHeader(response, 'X-Arrakis-Speech-Plan-SHA256'),
+      }
+      if (!/^[a-f0-9]{64}$/.test(binding.speechPlanSha256)) {
+        throw new Error('AUDIO_STREAM_BINDING_INVALID')
       }
       if (!response.body) throw new Error('AUDIO_STREAM_BODY_UNAVAILABLE')
       return { response, binding }
@@ -81,7 +85,7 @@ export class NativeVoiceService {
         transport.then(result => result.binding),
         async report => {
           const reportBinding = (await transport).binding
-          await this.persistReport(reportBinding.deliveryId, sessionId, report)
+          await this.persistReport(reportBinding, sessionId, report)
         },
       )
       const result = await transport
@@ -198,12 +202,14 @@ export class NativeVoiceService {
   }
 
   private async persistReport(
-    deliveryId: string, sessionId: string, report: NativePlayoutReport,
+    binding: NativeVoiceBinding, sessionId: string, report: NativePlayoutReport,
   ): Promise<void> {
-    const path = `${ENDPOINTS.AUDIO_SPEECH}/${encodeURIComponent(deliveryId)}/playout`
+    const path = `${ENDPOINTS.AUDIO_SPEECH}/${encodeURIComponent(binding.deliveryId)}/playout`
       + `?session_id=${encodeURIComponent(sessionId)}`
     await transportFetchJson(path, {
-      method: 'POST', body: JSON.stringify(report), timeout: 10000,
+      method: 'POST',
+      headers: { 'X-Arrakis-Speech-Plan-SHA256': binding.speechPlanSha256 },
+      body: JSON.stringify(report), timeout: 10000,
     })
   }
 

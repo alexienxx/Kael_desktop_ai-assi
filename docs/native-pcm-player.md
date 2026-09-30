@@ -1,14 +1,19 @@
 # Arrakis native PCM player
 
-This is a real Web Audio component, not yet mounted in App.tsx. Public media
-authorization/transport and the canonical SpeechPlan binding are still pending
-in the parent Arrakis repository. It must not synthesize arbitrary client text,
-restore legacy TTS URLs, or invent a delivery/utterance identity.
+This is the real Web Audio component used by `nativeVoiceService` from the
+desktop application. It must not synthesize arbitrary client text, restore
+legacy TTS URLs, or invent a delivery/utterance identity.
 
 ## Contract
 
 - One player owns one server-issued delivery/utterance/epoch. One active player
   per JavaScript context; cross-window admission belongs to the server.
+- The server-issued binding also contains the lowercase SHA-256 of the
+  canonical SpeechPlan. The service rejects a missing or malformed digest
+  before opening the player, keeps it in the immutable delivery binding, and
+  returns it on every playout receipt. The AudioWorklet receives only
+  utterance/epoch because the plan digest is presentation identity, not DSP
+  input.
 - Input is PCM signed 16-bit little-endian, mono, 24 kHz; frames contain at most
   2,400 samples. The queue is bounded by both 9,600 samples and four frames.
   Total input is bounded by 720,000 samples and 4,096 frames.
@@ -52,7 +57,8 @@ boundary may undercount genuinely audible audio; it deliberately cannot include
 new samples counted upstream after local mute.
 
 No raw PCM, transcript, voice reference, API credential or conversation is
-persisted by this player. Unconsumed frames are dropped at termination. Browser
+persisted by this player. The SpeechPlan digest is metadata and contains no
+surface text. Unconsumed frames are dropped at termination. Browser
 engine tests, if available, do not prove soundcard output, production endpoint
 wiring, acoustic echo cancellation or full duplex.
 

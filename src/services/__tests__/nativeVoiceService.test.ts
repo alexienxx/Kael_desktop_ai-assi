@@ -17,6 +17,8 @@ vi.mock('../nativePcmPlayer', () => ({
 
 import { NativeVoiceService } from '../nativeVoiceService'
 
+const SPEECH_PLAN_SHA256 = 'a'.repeat(64)
+
 function terminalFrame(): Uint8Array {
   const frame = new Uint8Array(12)
   const view = new DataView(frame.buffer)
@@ -40,8 +42,19 @@ describe('NativeVoiceService canonical assistant selection', () => {
       receiptDelivery: Promise.resolve(),
       closed: Promise.resolve(),
     }
-    mocks.open.mockImplementation(async (bindingPromise: Promise<unknown>) => {
+    mocks.open.mockImplementation(async (
+      bindingPromise: Promise<unknown>,
+      onReport: (report: unknown) => Promise<void>,
+    ) => {
       await bindingPromise
+      await onReport({
+        sequence: 0,
+        played_sample_boundary: 0,
+        status: 'interrupted',
+        measured_at: '2026-09-30T12:00:00.000Z',
+        measurement_method: 'audio_worklet_render_quantum',
+        discontinuity: true,
+      })
       return player
     })
     mocks.transportFetch.mockResolvedValue(new Response(
@@ -60,6 +73,7 @@ describe('NativeVoiceService canonical assistant selection', () => {
           'X-Arrakis-Delivery-Id': 'delivery-73',
           'X-Arrakis-Utterance-Id': 'utterance-73',
           'X-Arrakis-Epoch': '1',
+          'X-Arrakis-Speech-Plan-SHA256': SPEECH_PLAN_SHA256,
         },
       },
     ))
@@ -78,5 +92,37 @@ describe('NativeVoiceService canonical assistant selection', () => {
     const serializedCall = JSON.stringify(mocks.transportFetch.mock.calls[0])
     expect(serializedCall).not.toContain('transcript')
     expect(serializedCall).not.toContain('text')
+    expect(mocks.transportFetchJson).toHaveBeenCalledWith(
+      '/audio/speech/delivery-73/playout?session_id=canonical%20chat',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'X-Arrakis-Speech-Plan-SHA256': SPEECH_PLAN_SHA256 },
+      }),
+    )
+  })
+
+  it.each([
+    ['missing', undefined],
+    ['malformed', 'A'.repeat(64)],
+  ])('rejects a response with a %s speech-plan digest', async (_case, digest) => {
+    const headers: Record<string, string> = {
+      'X-Arrakis-Audio-Protocol': 'arrakis_pcm_frames_v1',
+      'X-Arrakis-Sample-Rate': '24000',
+      'X-Arrakis-Channels': '1',
+      'X-Arrakis-Encoding': 'pcm_s16le',
+      'X-Arrakis-Delivery-Id': 'delivery-73',
+      'X-Arrakis-Utterance-Id': 'utterance-73',
+      'X-Arrakis-Epoch': '1',
+    }
+    if (digest !== undefined) headers['X-Arrakis-Speech-Plan-SHA256'] = digest
+    mocks.transportFetch.mockResolvedValueOnce(new Response(
+      new Uint8Array([1, 2]),
+      { headers },
+    ))
+
+    await expect(
+      new NativeVoiceService().playAssistantTurn(73, 'canonical chat'),
+    ).rejects.toThrow('AUDIO_STREAM_BINDING_INVALID')
+    expect(mocks.transportFetchJson).not.toHaveBeenCalled()
   })
 })
