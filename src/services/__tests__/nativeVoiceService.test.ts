@@ -18,6 +18,20 @@ vi.mock('../nativePcmPlayer', () => ({
 import { NativeVoiceService } from '../nativeVoiceService'
 
 const SPEECH_PLAN_SHA256 = 'a'.repeat(64)
+const PLAYOUT_REPORT_V2 = {
+  sequence: 0,
+  played_sample_boundary: 128,
+  status: 'interrupted',
+  measured_at: '2026-09-30T12:00:00.000Z',
+  measurement_method: 'audio_worklet_render_quantum',
+  discontinuity: true,
+  schema_version: 'arrakis.playout-report.v2',
+  timing_method: 'client_performance_now',
+  player_open_to_first_frame_ms: 3.125,
+  player_open_to_first_quantum_ms: 8.75,
+  stop_to_local_mute_command_ms: 0.042,
+  stop_to_worklet_ack_ms: 2.5,
+} as const
 
 function terminalFrame(): Uint8Array {
   const frame = new Uint8Array(12)
@@ -47,14 +61,7 @@ describe('NativeVoiceService canonical assistant selection', () => {
       onReport: (report: unknown) => Promise<void>,
     ) => {
       await bindingPromise
-      await onReport({
-        sequence: 0,
-        played_sample_boundary: 0,
-        status: 'interrupted',
-        measured_at: '2026-09-30T12:00:00.000Z',
-        measurement_method: 'audio_worklet_render_quantum',
-        discontinuity: true,
-      })
+      await onReport(PLAYOUT_REPORT_V2)
       return player
     })
     mocks.transportFetch.mockResolvedValue(new Response(
@@ -97,7 +104,16 @@ describe('NativeVoiceService canonical assistant selection', () => {
       expect.objectContaining({
         method: 'POST',
         headers: { 'X-Arrakis-Speech-Plan-SHA256': SPEECH_PLAN_SHA256 },
+        body: JSON.stringify(PLAYOUT_REPORT_V2),
       }),
+    )
+    const persisted = JSON.parse(mocks.transportFetchJson.mock.calls[0][1].body)
+    expect(persisted).toEqual(PLAYOUT_REPORT_V2)
+    expect(persisted.player_open_to_first_quantum_ms).toBeGreaterThanOrEqual(
+      persisted.player_open_to_first_frame_ms,
+    )
+    expect(persisted.stop_to_worklet_ack_ms).toBeGreaterThanOrEqual(
+      persisted.stop_to_local_mute_command_ms,
     )
   })
 

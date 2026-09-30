@@ -56,6 +56,13 @@ human attention and semantic word alignment remain unproved. Stop's frozen
 boundary may undercount genuinely audible audio; it deliberately cannot include
 new samples counted upstream after local mute.
 
+Reports use `arrakis.playout-report.v2` and add client-monotonic durations from
+player open to the first decoded frame and first Worklet quantum, plus stop
+request to the local gain-mute command and Worklet acknowledgement. The same
+values are carried forward unchanged from `playing` to the terminal report.
+They are never compared with server-monotonic synthesis timings. The mute value
+measures issuance of the local gain command, not physical soundcard silence.
+
 No raw PCM, transcript, voice reference, API credential or conversation is
 persisted by this player. The SpeechPlan digest is metadata and contains no
 surface text. Unconsumed frames are dropped at termination. Browser
@@ -80,6 +87,11 @@ boundary corrections. Targeted checks on 26 September 2026:
 - Test harness loaded production source into the actual browser engine. TS was
   transpiled and only the Vite asset base URL was replaced by the local file URL.
   No replacement AudioContext/processor, fake endpoint or backend was used.
+- On 30 September 2026 a second real cached-Chromium run against the production
+  source reported first decoded frame at 6.1 ms, first Worklet quantum at
+  21.1 ms, local mute command at 0.4 ms, Worklet stop acknowledgement at
+  0.6 ms and complete `stop()` resolution at 0.8 ms. These are browser-engine
+  observations on this PC, not installed-desktop, soundcard or hearing proof.
 
 No production app/backend has been started. These are engine/type checks only;
 hardware output, UI wiring, authenticated transport and persistence remain open.
