@@ -37,7 +37,7 @@ export function ControlCenter({ open, onOpenChange, onExpandObservatory }: Contr
         {/* Header */}
         <SheetHeader className="px-5 py-4 border-b border-border/40 flex flex-row items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <SheetTitle className="text-lg font-semibold">Kael Control Center</SheetTitle>
+            <SheetTitle className="text-lg font-semibold">Arrakis Control Center</SheetTitle>
             <div className="flex items-center gap-1.5">
               {status === 'live' ? (
                 <>

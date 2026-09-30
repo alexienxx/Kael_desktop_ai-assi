@@ -13,6 +13,8 @@ interface ChatWindowProps {
   themeSettings: ThemeSettings
   bubbleClasses: (role: 'user' | 'assistant') => string
   onMediaDownload: (messageId: string, type: 'image' | 'audio') => void
+  onSpeak: (message: Message) => void
+  speakingMessageId: string | null
   onOpenServices?: () => void
   serviceContextChips?: ServiceContextChip[]
   onRemoveContextChip?: (chipId: string) => void
@@ -23,6 +25,8 @@ export function ChatWindow({
   themeSettings,
   bubbleClasses,
   onMediaDownload,
+  onSpeak,
+  speakingMessageId,
   onOpenServices,
   serviceContextChips = [],
   onRemoveContextChip
@@ -65,7 +69,7 @@ export function ChatWindow({
             </div>
             <h2 className="text-2xl font-semibold text-foreground">Start a conversation</h2>
             <p className="text-muted-foreground">
-              Send a message to begin chatting with Kael
+              Invia un messaggio per iniziare a parlare con Arrakis
             </p>
           </div>
         </div>
@@ -86,9 +90,13 @@ export function ChatWindow({
                 <MessageBubble
                   key={message.id}
                   message={message}
-                  bubbleClasses={bubbleClasses(message.role)}
+                  bubbleClasses={bubbleClasses(
+                    message.role === 'user' ? 'user' : 'assistant'
+                  )}
                   showTimestamp={themeSettings.spacingMode !== 'compact'}
                   onMediaDownload={onMediaDownload}
+                  onSpeak={onSpeak}
+                  speaking={speakingMessageId === message.id}
                 />
               ))}
             </div>

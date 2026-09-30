@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { formatDistanceToNow } from 'date-fns'
 import { useState } from 'react'
+import arrakisLogo from '@/assets/arrakis-logo.png'
 
 interface SidebarProps {
   conversations: Conversation[]
@@ -35,7 +36,10 @@ export function Sidebar({
     <div className="w-80 border-r border-border/50 glass-panel flex flex-col">
       <div className="p-4 border-b border-border/50">
         <div className="flex items-center justify-between mb-4">
-          <h1 className="text-2xl font-semibold tracking-tight">Kael</h1>
+          <div className="flex items-center gap-2">
+            <img src={arrakisLogo} alt="Arrakis" className="h-9 w-9 object-contain" />
+            <h1 className="text-2xl font-semibold tracking-tight">Arrakis</h1>
+          </div>
           <Button
             size="icon"
             onClick={onNewChat}

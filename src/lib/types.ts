@@ -17,6 +17,10 @@ export interface Message {
   content: MessageContent
   timestamp: Date
   conversationId: string
+  /** Canonical PostgreSQL assistant turn eligible for exact-surface speech. */
+  assistantTurnId?: number
+  /** Presentation channel. Voice notes keep their transcript internal. */
+  deliveryMode?: 'text' | 'voice_note'
   /** Present only when role === 'external_agent' */
   externalAgentId?: string
   /** Present only when role === 'external_agent' */

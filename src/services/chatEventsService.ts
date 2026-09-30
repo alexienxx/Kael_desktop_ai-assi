@@ -102,6 +102,7 @@ export class ChatEventsService {
 
       // Named event types the backend may emit
       const namedEvents: ChatEvent['type'][] = [
+        'new_message',
         'message',
         'message_start',
         'message_end',
@@ -189,6 +190,14 @@ export class ChatEventsService {
           ? rawRole
           : 'assistant'
 
+      const rawTurnId = parsed.turn_id ?? parsed.assistant_turn_id
+      const assistantTurnId = typeof rawTurnId === 'number' && Number.isSafeInteger(rawTurnId)
+        && rawTurnId > 0 ? rawTurnId : undefined
+      const rawDeliveryMode = parsed.delivery_mode
+      const deliveryMode = (
+        rawDeliveryMode === 'voice_note' || rawDeliveryMode === 'voice_call' ||
+        rawDeliveryMode === 'image' || rawDeliveryMode === 'video_message'
+      ) ? rawDeliveryMode : 'text'
       const event: ChatEvent = {
         ...parsed,
         type,
@@ -198,12 +207,16 @@ export class ChatEventsService {
             ? parsed.message_id
             : typeof parsed.messageId === 'string'
             ? parsed.messageId
+            : assistantTurnId !== undefined
+            ? String(assistantTurnId)
             : undefined,
         conversationId:
           typeof parsed.conversation_id === 'string'
             ? parsed.conversation_id
             : typeof parsed.conversationId === 'string'
             ? parsed.conversationId
+            : typeof parsed.session_id === 'string'
+            ? parsed.session_id
             : undefined,
         content:
           typeof parsed.content === 'string'
@@ -212,9 +225,17 @@ export class ChatEventsService {
             ? parsed.text
             : typeof parsed.message === 'string'
             ? parsed.message
+            : typeof parsed.preview === 'string'
+            ? parsed.preview
             : undefined,
         timestamp:
-          typeof parsed.timestamp === 'string' ? parsed.timestamp : new Date().toISOString(),
+          typeof parsed.timestamp === 'string'
+            ? parsed.timestamp
+            : typeof parsed.ts === 'number' && Number.isFinite(parsed.ts)
+            ? new Date(parsed.ts * 1000).toISOString()
+            : new Date().toISOString(),
+        assistantTurnId,
+        deliveryMode,
         externalAgentId:
           typeof parsed.external_agent_id === 'string'
             ? parsed.external_agent_id

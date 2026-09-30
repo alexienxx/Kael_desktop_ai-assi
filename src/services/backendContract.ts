@@ -36,6 +36,10 @@ export const ENDPOINTS = {
   CHAT_EVENTS: '/chat/events',
   /** Request short-lived SSE token */
   CHAT_EVENTS_TOKEN: '/chat/events/token',
+  /** Canonical native PCM speech presentation */
+  AUDIO_SPEECH: '/audio/speech',
+  /** Raw bounded voice note into canonical chat ingress */
+  AUDIO_NOTES: '/audio/notes',
   /** Agentic repo-awareness endpoints */
   AGENTIC_REPO_STATUS: '/agentic/repo/status',
   AGENTIC_REPO_ANALYZE: '/agentic/repo/analyze',
@@ -88,7 +92,7 @@ export function resolveMediaUrl(
 export interface SendChatMessageRequest {
   conversationId?: string
   message: string
-  context?: Record<string, unknown>
+  clientMessageId: string
 }
 
 export interface SendChatMessageResponse {
@@ -97,6 +101,7 @@ export interface SendChatMessageResponse {
   content: string
   role: 'assistant'
   timestamp: string
+  assistantTurnId?: number
 }
 
 export interface SubmitFeedbackRequest {
@@ -119,6 +124,8 @@ export interface ChatHistoryMessage {
   role: 'user' | 'assistant' | 'external_agent'
   content: string
   timestamp: string
+  assistantTurnId?: number
+  inputMode?: 'voice_note'
   /** Present only when role === 'external_agent' */
   externalAgentId?: string
   /** Present only when role === 'external_agent' */
@@ -137,6 +144,7 @@ export interface ChatPendingMessage {
   role: 'user' | 'assistant' | 'external_agent'
   content: string
   timestamp: string
+  assistantTurnId?: number
   /** Present only when role === 'external_agent' */
   externalAgentId?: string
   /** Present only when role === 'external_agent' */
@@ -144,6 +152,7 @@ export interface ChatPendingMessage {
 }
 
 export type ChatEventType =
+  | 'new_message'
   | 'message'
   | 'message_start'
   | 'message_end'
@@ -157,6 +166,8 @@ export interface ChatEvent {
   conversationId?: string
   role?: 'user' | 'assistant' | 'external_agent'
   content?: string
+  assistantTurnId?: number
+  deliveryMode?: 'text' | 'voice_note' | 'voice_call' | 'image' | 'video_message'
   timestamp?: string
   externalAgentId?: string
   externalAgentName?: string
@@ -183,6 +194,26 @@ function asString(value: unknown, fallback: string): string {
   return fallback
 }
 
+export interface SendVoiceNoteRequest {
+  conversationId: string
+  clientMessageId: string
+  audio: Blob
+  language?: 'it' | 'en'
+}
+
+export interface SendVoiceNoteResponse extends SendChatMessageResponse {
+  inputMode: 'voice_note'
+  assistantTurnId: number
+}
+
+function asTimestamp(value: unknown, fallback: string): string {
+  if (typeof value === 'string' && value.length > 0) return value
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return new Date(value * 1000).toISOString()
+  }
+  return fallback
+}
+
 // ── Adapter ───────────────────────────────────────────────────────────────────
 
 /**
@@ -205,18 +236,71 @@ export class BackendContractAdapter {
     const data = await transportFetchJson<Record<string, unknown>>(ENDPOINTS.CHAT, {
       method: 'POST',
       body: JSON.stringify({
-        conversation_id: request.conversationId,
-        message: request.message,
-        context: request.context,
+        text: request.message,
+        session_id: request.conversationId,
+        client_message_id: request.clientMessageId,
       }),
     })
 
+    const assistantTurnId = typeof data.assistant_turn_id === 'number'
+      && Number.isSafeInteger(data.assistant_turn_id) && data.assistant_turn_id > 0
+      ? data.assistant_turn_id : undefined
+
     return {
-      conversationId: asString(data.conversation_id ?? data.conversationId, ''),
-      messageId: asString(data.message_id ?? data.messageId, `msg-${Date.now()}`),
-      content: asString(data.content ?? data.message, ''),
+      conversationId: asString(
+        data.conversation_id ?? data.conversationId ?? data.session_id,
+        request.conversationId ?? ''
+      ),
+      messageId: assistantTurnId !== undefined
+        ? `assistant-turn-${assistantTurnId}`
+        : asString(data.exchange_id, `assistant-${request.clientMessageId}`),
+      content: asString(data.content ?? data.message ?? data.reply, ''),
       role: 'assistant',
-      timestamp: asString(data.timestamp, new Date().toISOString()),
+      timestamp: asTimestamp(data.server_created_at ?? data.timestamp, new Date().toISOString()),
+      assistantTurnId,
+    }
+  }
+
+  /**
+   * Send one bounded recording through the same canonical chat coordinator.
+   * Maps to: POST /audio/notes with the encoded audio as the raw request body.
+   */
+  async sendVoiceNote(
+    request: SendVoiceNoteRequest
+  ): Promise<SendVoiceNoteResponse> {
+    const query = new URLSearchParams({
+      session_id: request.conversationId,
+      client_message_id: request.clientMessageId,
+      language: request.language ?? 'it',
+    })
+    const data = await transportFetchJson<Record<string, unknown>>(
+      `${ENDPOINTS.AUDIO_NOTES}?${query.toString()}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': request.audio.type || 'application/octet-stream' },
+        body: request.audio,
+      }
+    )
+    const assistantTurnId = typeof data.assistant_turn_id === 'number'
+      && Number.isSafeInteger(data.assistant_turn_id) && data.assistant_turn_id > 0
+      ? data.assistant_turn_id : undefined
+    if (data.input_mode !== 'voice_note') {
+      throw new Error('Voice note response lost its canonical input provenance')
+    }
+    if (assistantTurnId === undefined) {
+      throw new Error('Voice note response lost its canonical assistant turn')
+    }
+    return {
+      conversationId: asString(
+        data.conversation_id ?? data.conversationId ?? data.session_id,
+        request.conversationId
+      ),
+      messageId: `assistant-turn-${assistantTurnId}`,
+      content: asString(data.content ?? data.message ?? data.reply, ''),
+      role: 'assistant',
+      timestamp: asTimestamp(data.server_created_at ?? data.timestamp, new Date().toISOString()),
+      assistantTurnId,
+      inputMode: 'voice_note',
     }
   }
 
@@ -261,7 +345,7 @@ export class BackendContractAdapter {
         ? ((data as Record<string, unknown>).messages as Record<string, unknown>[])
         : []
 
-      return items.map((item) => this.coerceChatHistoryMessage(item))
+      return items.map((item) => this.coerceChatHistoryMessage(item, conversationId ?? ''))
     } catch (err) {
       console.warn('[backendContract] getChatHistoryMessages failed:', err)
       return []
@@ -286,7 +370,7 @@ export class BackendContractAdapter {
         ? ((data as Record<string, unknown>).messages as Record<string, unknown>[])
         : []
 
-      return items.map((item) => this.coerceChatHistoryMessage(item))
+      return items.map((item) => this.coerceChatHistoryMessage(item, conversationId ?? ''))
     } catch (err) {
       console.warn('[backendContract] getChatHistoryPending failed:', err)
       return []
@@ -315,7 +399,7 @@ export class BackendContractAdapter {
       return {
         conversationId: convId,
         summary: typeof data.summary === 'string' ? data.summary : undefined,
-        recentMessages: recentRaw.map((item) => this.coerceChatHistoryMessage(item)),
+        recentMessages: recentRaw.map((item) => this.coerceChatHistoryMessage(item, conversationId ?? '')),
       }
     } catch (err) {
       console.warn('[backendContract] getChatContextRecent failed:', err)
@@ -326,19 +410,36 @@ export class BackendContractAdapter {
   /**
    * Coerce an unknown payload item into a ChatHistoryMessage.
    */
-  private coerceChatHistoryMessage(item: Record<string, unknown>): ChatHistoryMessage {
+  private coerceChatHistoryMessage(
+    item: Record<string, unknown>, fallbackConversationId = ''
+  ): ChatHistoryMessage {
     const rawRole = item.role ?? item.sender
     const role: 'user' | 'assistant' | 'external_agent' =
       rawRole === 'user' || rawRole === 'assistant' || rawRole === 'external_agent'
         ? rawRole
         : 'assistant'
 
+    const rawTurn = item.assistant_turn_id ?? item.assistantTurnId
+      ?? (role === 'assistant' ? item.id : undefined)
+    const parsedTurn = typeof rawTurn === 'number' ? rawTurn
+      : typeof rawTurn === 'string' && /^\d+$/.test(rawTurn) ? Number(rawTurn) : undefined
+    const metadata = item.metadata && typeof item.metadata === 'object'
+      ? item.metadata as Record<string, unknown> : undefined
+    const rawInputMode = item.input_mode ?? item.delivery_mode
+      ?? metadata?.input_mode ?? metadata?.delivery_mode
+    const inputMode = rawInputMode === 'voice_note' ? 'voice_note' : undefined
     const base: ChatHistoryMessage = {
       messageId: asString(item.message_id ?? item.messageId ?? item.id, `msg-${Date.now()}`),
-      conversationId: asString(item.conversation_id ?? item.conversationId, ''),
+      conversationId: asString(
+        item.conversation_id ?? item.conversationId,
+        fallbackConversationId
+      ),
       role,
       content: asString(item.content ?? item.text ?? item.message, ''),
-      timestamp: asString(item.timestamp, new Date().toISOString()),
+      timestamp: asTimestamp(item.timestamp, new Date().toISOString()),
+      assistantTurnId: role === 'assistant' && Number.isSafeInteger(parsedTurn)
+        && Number(parsedTurn) > 0 ? Number(parsedTurn) : undefined,
+      inputMode,
     }
 
     if (role === 'external_agent') {

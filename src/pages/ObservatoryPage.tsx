@@ -5,7 +5,7 @@
  * Opened from ControlCenter "Expand" button or sidebar.
  */
 
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
@@ -34,7 +34,12 @@ import type { ObservatorySectionKey } from '@/lib/observatory-types'
 
 interface ObservatoryPageProps {
   onClose: () => void
+  activeSessionId: string | null
 }
+
+type ObservatoryView = ObservatorySectionKey | 'starfield'
+
+const StarfieldSection = lazy(() => import('@/panels/observatory/StarfieldSection'))
 
 const TAB_CONFIG: { key: ObservatorySectionKey; label: string }[] = [
   { key: 'overview', label: 'Overview' },
@@ -49,11 +54,19 @@ const TAB_CONFIG: { key: ObservatorySectionKey; label: string }[] = [
   { key: 'debug', label: 'Debug' },
 ]
 
-export function ObservatoryPage({ onClose }: ObservatoryPageProps) {
-  const [activeTab, setActiveTab] = useState<ObservatorySectionKey>('overview')
-  const { data, status, lastUpdate, refresh } = useObservatoryData(true)
+export function ObservatoryPage({ onClose, activeSessionId }: ObservatoryPageProps) {
+  const [activeTab, setActiveTab] = useState<ObservatoryView>('overview')
+  const starfieldOpen = activeTab === 'starfield'
+  const { data, status, lastUpdate, refresh } = useObservatoryData(!starfieldOpen)
 
   const renderSection = () => {
+    if (starfieldOpen) {
+      return (
+        <Suspense fallback={<SectionLoading />}>
+          <StarfieldSection key={activeSessionId ?? 'no-active-session'} sessionId={activeSessionId} />
+        </Suspense>
+      )
+    }
     if (status === 'unconfigured') return <SectionUnconfigured />
     if (status === 'loading' || (!data && status !== 'error')) return <SectionLoading />
     if (status === 'error' && !data) return <SectionError />
@@ -87,9 +100,11 @@ export function ObservatoryPage({ onClose }: ObservatoryPageProps) {
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-border/40 shrink-0">
         <div className="flex items-center gap-3">
-          <h1 className="text-lg font-semibold">Kael Cognitive Observatory</h1>
+          <h1 className="text-lg font-semibold">Arrakis Cognitive Observatory</h1>
           <div className="flex items-center gap-1.5">
-            {status === 'live' ? (
+            {starfieldOpen ? (
+              <span className="text-xs text-cyan-300">Scoped field</span>
+            ) : status === 'live' ? (
               <>
                 <motion.div
                   animate={{ scale: [1, 1.4, 1] }}
@@ -102,7 +117,7 @@ export function ObservatoryPage({ onClose }: ObservatoryPageProps) {
               <span className="text-xs text-muted-foreground capitalize">{status}</span>
             )}
           </div>
-          {lastUpdate && (
+          {!starfieldOpen && lastUpdate && (
             <span className="text-[10px] text-muted-foreground">
               Last: {lastUpdate.toLocaleTimeString()}
             </span>
@@ -110,10 +125,12 @@ export function ObservatoryPage({ onClose }: ObservatoryPageProps) {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" className="h-8 px-2" onClick={refresh}>
-            <ArrowsClockwise className="h-3.5 w-3.5 mr-1" />
-            Refresh
-          </Button>
+          {!starfieldOpen && (
+            <Button variant="ghost" size="sm" className="h-8 px-2" onClick={refresh}>
+              <ArrowsClockwise className="h-3.5 w-3.5 mr-1" />
+              Refresh
+            </Button>
+          )}
           <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={onClose}>
             <X className="h-4 w-4" />
           </Button>
@@ -154,6 +171,16 @@ export function ObservatoryPage({ onClose }: ObservatoryPageProps) {
                 </button>
               )
             })}
+            <button
+              onClick={() => setActiveTab('starfield')}
+              className={`relative px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+                starfieldOpen
+                  ? 'bg-cyan-300/10 text-cyan-200'
+                  : 'text-muted-foreground hover:text-foreground hover:bg-foreground/5'
+              }`}
+            >
+              Starfield 3D
+            </button>
           </div>
           <ScrollBar orientation="horizontal" />
         </ScrollArea>
@@ -161,7 +188,7 @@ export function ObservatoryPage({ onClose }: ObservatoryPageProps) {
 
       {/* Content */}
       <ScrollArea className="flex-1">
-        <div className="max-w-3xl mx-auto px-6 py-5">
+        <div className={`${starfieldOpen ? 'max-w-7xl' : 'max-w-3xl'} mx-auto px-6 py-5`}>
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}

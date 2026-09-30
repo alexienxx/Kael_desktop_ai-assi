@@ -101,7 +101,7 @@ export function SettingsPanel({
         <SheetHeader>
           <SheetTitle className="text-xl">Settings</SheetTitle>
           <SheetDescription>
-            Customize your Kael experience
+            Personalizza la tua esperienza con Arrakis
           </SheetDescription>
         </SheetHeader>
 

@@ -12,6 +12,18 @@
 import { BackendContractAdapter, ChatHistoryMessage } from './backendContract'
 import { Message } from '@/lib/types'
 
+/** Safe sidebar text for one canonical message presentation. */
+export function messagePreview(message: Message): string | undefined {
+  if (message.deliveryMode === 'voice_note') {
+    return message.role === 'user'
+      ? 'Messaggio vocale'
+      : 'Messaggio vocale di Arrakis'
+  }
+  return message.content.type === 'text'
+    ? message.content.text?.substring(0, 50)
+    : undefined
+}
+
 /**
  * Convert a backend ChatHistoryMessage into the desktop Message type.
  */
@@ -19,9 +31,16 @@ function toMessage(item: ChatHistoryMessage): Message {
   return {
     id: item.messageId,
     role: item.role,
-    content: { type: 'text', text: item.content },
+    content: {
+      type: 'text',
+      text: item.role === 'user' && item.inputMode === 'voice_note'
+        ? '🎙️ Messaggio vocale'
+        : item.content,
+    },
     timestamp: new Date(item.timestamp),
     conversationId: item.conversationId,
+    assistantTurnId: item.assistantTurnId,
+    deliveryMode: item.inputMode === 'voice_note' ? 'voice_note' : 'text',
     ...(item.role === 'external_agent' && {
       externalAgentId: item.externalAgentId,
       externalAgentName: item.externalAgentName,

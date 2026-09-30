@@ -149,3 +149,77 @@ describe('backendContract – external_agent role handling', () => {
     expect(result[0].externalAgentId).toBeUndefined()
   })
 })
+
+describe('backendContract – canonical voice presentation', () => {
+  let adapter: BackendContractAdapter
+
+  beforeEach(() => {
+    adapter = new BackendContractAdapter()
+    mockTransport.mockClear()
+  })
+
+  it.each([
+    { input_mode: 'voice_note' },
+    { delivery_mode: 'voice_note' },
+    { metadata: { input_mode: 'voice_note' } },
+    { metadata: { delivery_mode: 'voice_note' } },
+  ])('normalizes voice mode from history metadata %#', async (mode) => {
+    mockTransport.mockResolvedValueOnce({
+      messages: [{
+        id: '73',
+        role: 'assistant',
+        text: 'private assistant transcript',
+        timestamp: 1735689600,
+        ...mode,
+      }],
+    })
+
+    const result = await adapter.getChatHistoryMessages('canonical-chat')
+
+    expect(result).toHaveLength(1)
+    expect(result[0].inputMode).toBe('voice_note')
+    expect(result[0].assistantTurnId).toBe(73)
+  })
+
+  it('keeps /audio/notes provenance and canonical assistant turn id', async () => {
+    mockTransport.mockResolvedValueOnce({
+      reply: 'private assistant transcript',
+      session_id: 'canonical-chat',
+      server_created_at: '2026-09-30T12:00:00Z',
+      assistant_turn_id: 91,
+      input_mode: 'voice_note',
+    })
+    const audio = new Blob(['audio'], { type: 'audio/webm' })
+
+    const result = await adapter.sendVoiceNote({
+      audio,
+      conversationId: 'canonical-chat',
+      clientMessageId: 'voice-client-1',
+      language: 'it',
+    })
+
+    const [path, request] = mockTransport.mock.calls[0]
+    expect(path).toContain('/audio/notes?')
+    expect(path).toContain('session_id=canonical-chat')
+    expect(request).toMatchObject({ method: 'POST', body: audio })
+    expect(result.inputMode).toBe('voice_note')
+    expect(result.assistantTurnId).toBe(91)
+    expect(result.messageId).toBe('assistant-turn-91')
+  })
+
+  it('rejects a voice response without a canonical assistant turn', async () => {
+    mockTransport.mockResolvedValueOnce({
+      reply: 'private assistant transcript',
+      session_id: 'canonical-chat',
+      server_created_at: '2026-09-30T12:00:00Z',
+      input_mode: 'voice_note',
+    })
+
+    await expect(adapter.sendVoiceNote({
+      audio: new Blob(['audio'], { type: 'audio/webm' }),
+      conversationId: 'canonical-chat',
+      clientMessageId: 'voice-client-without-turn',
+      language: 'it',
+    })).rejects.toThrow('canonical assistant turn')
+  })
+})

@@ -18,6 +18,12 @@ import { mediaService } from '@/services/mediaService'
 import { conversationManager } from '@/services/conversationManager'
 import { backendConfigStore } from '@/services/backendConfigStore'
 import { chatSyncService } from '@/services/chatSyncService'
+import { messagePreview } from '@/services/chatHistoryService'
+import { nativeVoiceService } from '@/services/nativeVoiceService'
+import {
+  nativeVoiceInputService,
+  type CapturedVoiceNote,
+} from '@/services/nativeVoiceInputService'
 
 function App() {
   const [conversations, setConversations] = useKV<Conversation[]>('kael-conversations', [])
@@ -35,6 +41,9 @@ function App() {
   const [serviceContextChips, setServiceContextChips] = useState<ServiceContextChip[]>([])
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected')
   const [sending, setSending] = useState(false)
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null)
+  const [voiceInputState, setVoiceInputState] = useState<'idle' | 'recording' | 'submitting'>('idle')
+  const voiceCaptureContextRef = useRef<{ conversationId: string; clientMessageId: string } | null>(null)
 
   // Track the previous connection status so we can detect reconnects
   const prevConnectionStatus = useRef<ConnectionStatus>('disconnected')
@@ -44,6 +53,11 @@ function App() {
   useEffect(() => {
     messagesRef.current = messages || []
   }, [messages])
+
+  useEffect(() => () => {
+    void nativeVoiceInputService.cancel()
+    void nativeVoiceService.stop()
+  }, [])
 
   // Apply theme settings on mount and change
   useEffect(() => {
@@ -112,6 +126,27 @@ function App() {
         return [...notCovered, ...backendMessages]
       })
 
+      // Rebuild sidebar previews from canonical presentation metadata.  A
+      // voice note keeps its recognized/generated surface internal even when
+      // an older local KV preview still contains that text.
+      const latestByConversation = new Map<string, Message>()
+      for (const message of backendMessages) {
+        const previous = latestByConversation.get(message.conversationId)
+        if (!previous || message.timestamp >= previous.timestamp) {
+          latestByConversation.set(message.conversationId, message)
+        }
+      }
+      setConversations((current) => (current || []).map((conversation) => {
+        const latest = latestByConversation.get(conversation.id)
+        return latest
+          ? {
+              ...conversation,
+              lastMessage: messagePreview(latest),
+              timestamp: latest.timestamp,
+            }
+          : conversation
+      }))
+
       // Seed known IDs so SSE/pending don't re-emit these messages
       chatSyncService.seedKnownIds(backendMessages)
     })
@@ -131,7 +166,7 @@ function App() {
             conv.id === msg.conversationId
               ? {
                   ...conv,
-                  lastMessage: msg.content.text?.substring(0, 50),
+                  lastMessage: messagePreview(msg),
                   timestamp: msg.timestamp,
                   messageCount: conv.messageCount + 1,
                 }
@@ -166,14 +201,16 @@ function App() {
   const activeMessages = (messages || []).filter(m => m.conversationId === activeConversationId)
 
   const handleNewChat = () => {
+    const id = `conv-${Date.now()}`
     const newConv: Conversation = {
-      id: `conv-${Date.now()}`,
+      id,
       title: 'New Conversation',
       timestamp: new Date(),
       messageCount: 0
     }
     setConversations((current) => [newConv, ...(current || [])])
-    setActiveConversationId(newConv.id)
+    setActiveConversationId(id)
+    return id
   }
 
   const handleSelectConversation = (id: string) => {
@@ -188,7 +225,7 @@ function App() {
 
     // Create user message immediately
     const userMessage: Message = {
-      id: `msg-${Date.now()}`,
+      id: globalThis.crypto.randomUUID(),
       role: 'user',
       content: { type: 'text', text },
       timestamp: new Date(),
@@ -216,7 +253,7 @@ function App() {
     if (backendService.isConnected()) {
       setSending(true)
       try {
-        const response = await backendService.sendMessage(text)
+        const response = await backendService.sendMessage(text, userMessage.id)
 
         // Create assistant message from backend response
         const assistantMessage: Message = {
@@ -224,7 +261,8 @@ function App() {
           role: 'assistant',
           content: { type: 'text', text: response.content },
           timestamp: new Date(response.timestamp),
-          conversationId: response.conversationId
+          conversationId: response.conversationId,
+          assistantTurnId: response.assistantTurnId,
         }
 
         setMessages((current) => [...(current || []), assistantMessage])
@@ -252,6 +290,154 @@ function App() {
       } finally {
         setSending(false)
       }
+    }
+  }
+
+  const submitCapturedVoiceNote = async (
+    note: CapturedVoiceNote,
+    context: { conversationId: string; clientMessageId: string }
+  ) => {
+    setVoiceInputState('submitting')
+    setSending(true)
+    const placeholder: Message = {
+      id: context.clientMessageId,
+      role: 'user',
+      content: { type: 'text', text: '🎙️ Messaggio vocale…' },
+      timestamp: new Date(),
+      conversationId: context.conversationId,
+      deliveryMode: 'voice_note',
+    }
+    setMessages((current) => [...(current || []), placeholder])
+    try {
+      const response = await backendService.sendVoiceNote(
+        note.audio,
+        context.clientMessageId,
+        context.conversationId,
+      )
+      const assistantMessage: Message = {
+        id: response.messageId,
+        role: 'assistant',
+        content: { type: 'text', text: response.content },
+        timestamp: new Date(response.timestamp),
+        conversationId: response.conversationId,
+        assistantTurnId: response.assistantTurnId,
+        deliveryMode: 'voice_note',
+      }
+      setMessages((current) => [...(current || []), assistantMessage])
+      setConversations((current) => (current || []).map((conversation) =>
+        conversation.id === context.conversationId
+          ? {
+              ...conversation,
+              title: conversation.messageCount === 0
+                ? 'Conversazione vocale'
+                : conversation.title,
+              lastMessage: 'Messaggio vocale di Arrakis',
+              timestamp: new Date(response.timestamp),
+              messageCount: conversation.messageCount + 2,
+            }
+          : conversation
+      ))
+      setVoiceInputState('idle')
+      if (response.assistantTurnId) {
+        setSpeakingMessageId(assistantMessage.id)
+        try {
+          await nativeVoiceService.playAssistantTurn(
+            response.assistantTurnId,
+            response.conversationId,
+          )
+        } catch (error) {
+          console.warn('[App] automatic voice response could not start', error)
+          toast.info('Risposta pronta: premi l’altoparlante per ascoltarla.')
+        } finally {
+          setSpeakingMessageId((current) => current === assistantMessage.id ? null : current)
+        }
+      }
+    } catch (error) {
+      setMessages((current) => (current || []).filter(
+        (message) => message.id !== context.clientMessageId
+      ))
+      console.error('Failed to send voice note:', error)
+      toast.error(error instanceof Error ? error.message : 'Invio vocale non riuscito')
+    } finally {
+      voiceCaptureContextRef.current = null
+      setSending(false)
+      setVoiceInputState('idle')
+    }
+  }
+
+  const handleVoiceToggle = async () => {
+    if (voiceInputState === 'submitting') return
+    if (voiceInputState === 'recording') {
+      const context = voiceCaptureContextRef.current
+      if (!context) return
+      setVoiceInputState('submitting')
+      try {
+        const note = await nativeVoiceInputService.stop()
+        await submitCapturedVoiceNote(note, context)
+      } catch (error) {
+        voiceCaptureContextRef.current = null
+        setVoiceInputState('idle')
+        toast.error(error instanceof Error ? error.message : 'Registrazione non riuscita')
+      }
+      return
+    }
+
+    if (!backendService.isConnected()) {
+      toast.error('Backend non connesso')
+      return
+    }
+    if (speakingMessageId) {
+      await nativeVoiceService.stop()
+      setSpeakingMessageId(null)
+    }
+    const conversationId = activeConversationId ?? handleNewChat()
+    const context = {
+      conversationId,
+      clientMessageId: globalThis.crypto.randomUUID(),
+    }
+    voiceCaptureContextRef.current = context
+    try {
+      const capabilities = await nativeVoiceInputService.start((note) => {
+        if (voiceCaptureContextRef.current !== context) return
+        void submitCapturedVoiceNote(note, context)
+      })
+      setVoiceInputState('recording')
+      if (capabilities.echoCancellation !== true) {
+        toast.info('Modalità registrazione attiva; AEC del dispositivo non confermata.')
+      }
+    } catch (error) {
+      voiceCaptureContextRef.current = null
+      setVoiceInputState('idle')
+      toast.error(error instanceof Error ? error.message : 'Microfono non disponibile')
+    }
+  }
+
+  const handleSpeak = async (message: Message) => {
+    if (speakingMessageId === message.id) {
+      await nativeVoiceService.stop()
+      setSpeakingMessageId(null)
+      return
+    }
+    if (!message.assistantTurnId) return
+    if (speakingMessageId) {
+      // Releasing the previous AudioContext crosses an async boundary and can
+      // consume the browser's transient user activation. This click therefore
+      // performs the guaranteed local stop; a fresh click starts the selected
+      // turn with a fresh, valid activation.
+      await nativeVoiceService.stop()
+      setSpeakingMessageId(null)
+      return
+    }
+    setSpeakingMessageId(message.id)
+    try {
+      await nativeVoiceService.playAssistantTurn(
+        message.assistantTurnId, message.conversationId
+      )
+    } catch (error) {
+      console.error('Native voice playback failed:', error)
+      toast.error(error instanceof Error ? error.message : 'Voice playback failed')
+    } finally {
+      setSpeakingMessageId(current => current === message.id ? null : current)
     }
   }
 
@@ -367,6 +553,8 @@ function App() {
           themeSettings={themeSettings || defaultThemeSettings}
           bubbleClasses={getBubbleStyleForRole}
           onMediaDownload={handleMediaDownload}
+          onSpeak={handleSpeak}
+          speakingMessageId={speakingMessageId}
           onOpenServices={() => setServicesOpen(true)}
           serviceContextChips={serviceContextChips}
           onRemoveContextChip={handleRemoveContextChip}
@@ -374,6 +562,8 @@ function App() {
 
         <Composer
           onSendMessage={handleSendMessage}
+          onVoiceToggle={handleVoiceToggle}
+          voiceState={voiceInputState}
           disabled={sending || !backendService.isConfigured()}
         />
       </div>
@@ -410,7 +600,10 @@ function App() {
       {/* Full Observatory overlay */}
       <AnimatePresence>
         {observatoryOpen && (
-          <ObservatoryPage onClose={() => setObservatoryOpen(false)} />
+          <ObservatoryPage
+            activeSessionId={activeConversationId}
+            onClose={() => setObservatoryOpen(false)}
+          />
         )}
       </AnimatePresence>
 

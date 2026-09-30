@@ -56,6 +56,8 @@ export interface TransportOptions extends Omit<RequestInit, 'signal'> {
   apiKey?: string
   /** Timeout in ms; falls back to backendConfigStore.getTimeout(). */
   timeout?: number
+  /** Optional caller cancellation retained for a streamed response body. */
+  signal?: AbortSignal
 }
 
 /**
@@ -74,6 +76,7 @@ export async function transportFetch(
     baseUrl = backendConfigStore.getBaseUrl() ?? '',
     apiKey = backendConfigStore.getApiKey(),
     timeout = backendConfigStore.getTimeout(),
+    signal,
     ...fetchInit
   } = opts
 
@@ -82,6 +85,8 @@ export async function transportFetch(
   }
 
   const controller = new AbortController()
+  if (signal?.aborted) controller.abort()
+  else signal?.addEventListener('abort', () => controller.abort(), { once: true })
   const timerId = setTimeout(() => controller.abort(), timeout)
 
   const normalizedBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl

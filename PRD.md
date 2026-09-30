@@ -98,7 +98,7 @@ Typography should convey modern sophistication with excellent readability—clea
 
 - **Primary Font**: Inter for UI elements, Crimson Pro for message content to add editorial refinement
 - **Typographic Hierarchy**: 
-  - H1 (App Title "Kael"): Inter SemiBold/24px/tight tracking (-0.02em)
+  - H1 (App Title "Arrakis"): Inter SemiBold/24px/tight tracking (-0.02em)
   - H2 (Section Headers): Inter Medium/16px/normal tracking
   - H3 (Chat Titles): Inter Medium/14px/normal tracking
   - Body (Messages): Crimson Pro Regular/15px/relaxed leading (1.6)

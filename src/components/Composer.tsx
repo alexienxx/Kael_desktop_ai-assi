@@ -5,10 +5,17 @@ import { Textarea } from '@/components/ui/textarea'
 
 interface ComposerProps {
   onSendMessage: (text: string) => void
+  onVoiceToggle?: () => void
+  voiceState?: 'idle' | 'recording' | 'submitting'
   disabled?: boolean
 }
 
-export function Composer({ onSendMessage, disabled = false }: ComposerProps) {
+export function Composer({
+  onSendMessage,
+  onVoiceToggle,
+  voiceState = 'idle',
+  disabled = false,
+}: ComposerProps) {
   const [message, setMessage] = useState('')
 
   const handleSend = () => {
@@ -42,17 +49,23 @@ export function Composer({ onSendMessage, disabled = false }: ComposerProps) {
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Message Kael..."
-            disabled={disabled}
+            placeholder={voiceState === 'recording' ? 'Sto ascoltando…' : 'Message Arrakis...'}
+            disabled={disabled || voiceState !== 'idle'}
             className="min-h-[52px] max-h-32 resize-none glass-panel border-white/30 focus:border-primary/50 focus:ring-2 focus:ring-primary/20 rounded-2xl px-4 py-3 font-message text-[15px]"
           />
         </div>
 
         <Button
           size="icon"
-          variant="ghost"
-          className="h-10 w-10 rounded-full hover:bg-accent/30 transition-all shrink-0"
-          disabled={disabled}
+          variant={voiceState === 'recording' ? 'destructive' : 'ghost'}
+          className={`h-10 w-10 rounded-full hover:bg-accent/30 transition-all shrink-0 ${
+            voiceState === 'recording' ? 'animate-pulse' : ''
+          }`}
+          disabled={!onVoiceToggle || voiceState === 'submitting' || (disabled && voiceState === 'idle')}
+          onClick={onVoiceToggle}
+          aria-label={voiceState === 'recording' ? 'Ferma e invia messaggio vocale' : 'Registra messaggio vocale'}
+          aria-pressed={voiceState === 'recording'}
+          title={voiceState === 'recording' ? 'Ferma e invia' : 'Parla con Arrakis'}
         >
           <Microphone className="h-5 w-5" />
         </Button>
@@ -70,7 +83,11 @@ export function Composer({ onSendMessage, disabled = false }: ComposerProps) {
       <div className="flex items-center justify-center gap-2 mt-2 text-xs text-muted-foreground">
         <div className="flex items-center gap-1.5">
           <div className={`h-1.5 w-1.5 rounded-full ${disabled ? 'bg-destructive' : 'bg-primary glow-accent'}`} />
-          <span>{disabled ? 'Offline' : 'Connected'}</span>
+          <span>{
+            voiceState === 'recording' ? 'Registrazione in corso' :
+            voiceState === 'submitting' ? 'Elaborazione vocale…' :
+            disabled ? 'Offline' : 'Connected'
+          }</span>
         </div>
       </div>
     </div>
