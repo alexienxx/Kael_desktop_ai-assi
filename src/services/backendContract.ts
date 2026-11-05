@@ -1,3 +1,16 @@
+/** A valid chat receipt can arrive without an assistant message. */
+export class ChatReceiptNotice extends Error {}
+
+const receiptMessages: Record<string, string> = {
+  received: 'Messaggio ricevuto.',
+  processing: 'Arrakis sta elaborando il messaggio.',
+  in_progress: 'Arrakis sta elaborando il messaggio.',
+  failed_retryable: 'Elaborazione interrotta. Il servizio consente un nuovo tentativo.',
+  recovery_required: 'Messaggio ricevuto. Elaborazione interrotta, recupero necessario.',
+  abandoned: 'Elaborazione chiusa senza risposta.',
+  silence: 'Arrakis ha scelto il silenzio.',
+}
+
 /**
  * Backend Contract Adapter
  *
@@ -242,6 +255,18 @@ export class BackendContractAdapter {
       }),
     })
 
+    const status = asString(data.exchange_status, '')
+    const outcome = asString(data.outcome_kind, '')
+    const content = asString(data.content ?? data.message ?? data.reply, '')
+    if ((status && status !== 'complete' && status !== 'response_committed')
+        || (outcome && outcome !== 'reply') || !content.trim()) {
+      const turnId = data.user_turn_id
+      const prefix = typeof turnId === 'number' && Number.isSafeInteger(turnId) && turnId > 0
+        ? `Turno ${turnId}. ` : ''
+      const notice = receiptMessages[status] ?? receiptMessages[outcome] ?? 'Nessuna risposta disponibile.'
+      throw new ChatReceiptNotice(prefix + notice)
+    }
+
     const assistantTurnId = typeof data.assistant_turn_id === 'number'
       && Number.isSafeInteger(data.assistant_turn_id) && data.assistant_turn_id > 0
       ? data.assistant_turn_id : undefined
@@ -254,7 +279,7 @@ export class BackendContractAdapter {
       messageId: assistantTurnId !== undefined
         ? `assistant-turn-${assistantTurnId}`
         : asString(data.exchange_id, `assistant-${request.clientMessageId}`),
-      content: asString(data.content ?? data.message ?? data.reply, ''),
+      content,
       role: 'assistant',
       timestamp: asTimestamp(data.server_created_at ?? data.timestamp, new Date().toISOString()),
       assistantTurnId,

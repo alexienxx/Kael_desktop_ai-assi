@@ -11,7 +11,7 @@
  */
 
 import { BackendConfig, ConnectionStatus } from '@/lib/types'
-import { BackendContractAdapter, resolveMediaUrl } from './backendContract'
+import { BackendContractAdapter, ChatReceiptNotice, resolveMediaUrl } from './backendContract'
 import { backendConfigStore } from './backendConfigStore'
 import { TransportError } from './backendTransport'
 import { conversationManager } from './conversationManager'
@@ -188,6 +188,7 @@ export class BackendService {
 
       return response
     } catch (error) {
+      if (error instanceof ChatReceiptNotice) throw error
       // Handle connection errors
       this.handleConnectionError(error)
       throw error
