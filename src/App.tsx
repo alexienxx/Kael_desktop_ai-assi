@@ -13,6 +13,7 @@ import { Message, Conversation, ThemeSettings, DownloadedMedia, BackendConfig, C
 import { defaultThemeSettings, applyThemeSettings, getBubbleClasses } from '@/lib/theme-config'
 import { Toaster } from '@/components/ui/sonner'
 import { toast } from 'sonner'
+import { ChatReceiptNotice } from '@/services/backendContract'
 import { backendService } from '@/services/backendService'
 import { mediaService } from '@/services/mediaService'
 import { conversationManager } from '@/services/conversationManager'
@@ -25,14 +26,16 @@ import {
   type CapturedVoiceNote,
 } from '@/services/nativeVoiceInputService'
 
+const localSession = import.meta.env.MODE === 'desktop-local' ? sessionStorage.getItem('arrakis-local-session') : null
+
 function App() {
-  const [conversations, setConversations] = useKV<Conversation[]>('kael-conversations', [])
+  const [conversations, setConversations] = useKV<Conversation[]>('kael-conversations', localSession ? [{ id: localSession, title: 'Arrakis', timestamp: new Date(), messageCount: 0 }] : [])
   const [messages, setMessages] = useKV<Message[]>('kael-messages', [])
   const [downloadedMedia, setDownloadedMedia] = useKV<DownloadedMedia[]>('kael-downloaded-media', [])
   const [themeSettings, setThemeSettings] = useKV<ThemeSettings>('kael-theme-settings', defaultThemeSettings)
   const [backendConfig, setBackendConfig] = useKV<BackendConfig | null>('kael-backend-config', null)
 
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(localSession)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [mediaOpen, setMediaOpen] = useState(false)
   const [controlCenterOpen, setControlCenterOpen] = useState(false)
@@ -283,6 +286,10 @@ function App() {
 
         toast.success('Message sent successfully')
       } catch (error) {
+        if (error instanceof ChatReceiptNotice) {
+          toast.info(error.message)
+          return
+        }
         console.error('Failed to send message:', error)
         toast.error(
           error instanceof Error ? error.message : 'Failed to send message'

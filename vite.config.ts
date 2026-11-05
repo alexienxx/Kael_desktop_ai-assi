@@ -9,17 +9,21 @@ import { resolve } from 'path'
 const projectRoot = process.env.PROJECT_ROOT || import.meta.dirname
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({mode}) => ({
   plugins: [
     react(),
     tailwindcss(),
     // DO NOT REMOVE
     createIconImportProxy() as PluginOption,
-    sparkPlugin() as PluginOption,
+    ...(mode === "desktop-local" ? [] : [sparkPlugin() as PluginOption]),
   ],
   resolve: {
     alias: {
+      ...(mode === "desktop-local" ? {
+        '@github/spark/hooks': resolve(projectRoot, 'src/local/browserState.ts'),
+        '@github/spark/spark': resolve(projectRoot, 'src/local/session.ts'),
+      } : {}),
       '@': resolve(projectRoot, 'src')
     }
   },
-});
+}));

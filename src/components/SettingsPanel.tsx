@@ -276,7 +276,7 @@ export function SettingsPanel({
               </div>
             </div>
 
-            <div className="space-y-3">
+            {import.meta.env.MODE !== 'desktop-local' && <div className="space-y-3">
               <Label className="text-sm font-medium">Backend Configuration</Label>
               <div className="p-4 rounded-lg glass-panel border border-border/50 space-y-3">
                 <div className="space-y-2">
@@ -327,7 +327,7 @@ export function SettingsPanel({
                   Save Configuration
                 </Button>
               </div>
-            </div>
+            </div>}
 
             <div className="space-y-3">
               <Label className="text-sm font-medium">Developer Options</Label>

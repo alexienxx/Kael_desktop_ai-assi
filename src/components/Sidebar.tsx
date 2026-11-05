@@ -42,6 +42,7 @@ export function Sidebar({
           </div>
           <Button
             size="icon"
+            disabled={import.meta.env.MODE === 'desktop-local'}
             onClick={onNewChat}
             className="h-9 w-9 rounded-full glow-accent"
           >

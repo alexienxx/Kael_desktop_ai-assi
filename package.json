@@ -5,6 +5,8 @@
     "type": "module",
     "scripts": {
         "dev": "vite",
+        "build:local": "vite build --mode desktop-local --outDir desktop-local-dist",
+        "start:local": "node tools/desktop-local.mjs",
         "kill": "fuser -k 5000/tcp",
         "build": "tsc -b --noCheck && vite build",
         "lint": "eslint .",
